@@ -303,11 +303,16 @@ export class Engine {
       this._triggerVoice(burstTime, s, nextMidi, vel * phaseAmp * 0.85, noteLen * 0.5);
     }
 
-    // maybe trigger a voice fragment, pitched to the current arp note
+    // maybe trigger a voice fragment, pitched to the current chord tone.
+    // NOTE: we use a reference state with rootOctave fixed at 3 and no
+    // per-note octave jitter, so vocals stay in their natural range even
+    // when the melody drifts into lower octaves.
     if (this.samples.samples.length) {
       const rate = (s.sampleTriggerRate ?? 0.25) * phaseAmp;
       if (Math.random() < rate) {
-        const semitones = midi - 60 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -12 : 12) : 0);
+        const vocalRef = { ...s, rootOctave: 3 };
+        const vocalMidi = chordNoteMidi(vocalRef, chordRoot, step);
+        const semitones = vocalMidi - 60 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -12 : 12) : 0);
         this.samples.trigger(this.effects.input, semitones, 0.65 + Math.random() * 0.35, time);
       }
     }

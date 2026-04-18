@@ -68,27 +68,35 @@ export class SampleBank {
     const duration = buffer.duration;
     if (duration <= 0.05) return;
 
-    // ~15% of the time, play a longer chunk (1.5–4s capped to recording length).
-    // for the short bucket, max is 1.8s and the bias is softened (r^1.3 instead
-    // of r^2), so clips in the 1–2s range are meaningfully more common.
-    const goLong = Math.random() < 0.15 && duration >= 1.6;
+    // Three-bucket length distribution:
+    //   50%  micro   — 60ms–300ms chopped stutter-like grains
+    //   35%  medium  — 400ms–1.8s, the 'slightly longer' feel
+    //   15%  long    — 1.5s–4s capped to recording length
+    const r = Math.random();
     let fragLen;
-    if (goLong) {
+    if (r < 0.15 && duration >= 1.6) {
       const longMax = Math.min(4.0, duration * 0.9);
       fragLen = 1.5 + Math.random() * Math.max(0, longMax - 1.5);
-      velocity *= 0.7;  // soften long fragments so they sit under the arp
-    } else {
-      const minLen = 0.12;
+      velocity *= 0.7;
+    } else if (r < 0.50) {
+      const minLen = 0.4;
       const maxLen = Math.min(1.8, duration * 0.9);
       fragLen = minLen + Math.pow(Math.random(), 1.3) * (maxLen - minLen);
+    } else {
+      const minLen = 0.06;
+      const maxLen = Math.min(0.3, duration * 0.9);
+      fragLen = minLen + Math.pow(Math.random(), 1.5) * (maxLen - minLen);
     }
     const start = Math.random() * Math.max(0.0001, duration - fragLen - 0.01);
 
+    // scale fades to fragment length so micro stutters don't get swallowed
+    const fadeIn  = Math.min(0.01, fragLen * 0.2);
+    const fadeOut = Math.min(0.04, fragLen * 0.35);
     const player = new Tone.Player({
       url: buffer,
       playbackRate: Math.pow(2, semitones / 12),
-      fadeIn: 0.01,
-      fadeOut: 0.04,
+      fadeIn,
+      fadeOut,
     });
     // +5 dB makeup so voices sit on top of the bed instead of behind it
     const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity)) + 5).connect(dest);

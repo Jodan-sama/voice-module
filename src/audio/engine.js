@@ -219,22 +219,22 @@ export class Engine {
     this.ambientPadSynth = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsawtooth', count: 3, spread: 22 },
       envelope: { attack: 3.2, decay: 2.0, sustain: 0.85, release: 6.0 },
-      volume: -26,
+      volume: -15,                                 // boosted so it's actually audible
     });
     this.ambientPadFilter = new Tone.Filter({
-      frequency: 600,
+      frequency: 700,
       type: 'lowpass',
       Q: 0.7,
       rolloff: -24,
     });
     this.ambientPadLFO = new Tone.LFO({
-      frequency: 0.035,       // ~28 second cycle
-      min: 300,
-      max: 1700,
+      frequency: 0.035,
+      min: 400,
+      max: 2100,
       type: 'sine',
     }).start();
     this.ambientPadLFO.connect(this.ambientPadFilter.frequency);
-    this.ambientPadGain = new Tone.Gain(0.7);
+    this.ambientPadGain = new Tone.Gain(1.0);
     this.ambientPadSynth.connect(this.ambientPadFilter);
     this.ambientPadFilter.connect(this.ambientPadGain);
     this.ambientPadGain.connect(this.breathGain);
@@ -285,7 +285,7 @@ export class Engine {
       const chordRoot = currentChordRoot(snap, Date.now());
       if (chordRoot === this._ambientPadLastChord) return;
 
-      const scale = SCALES[snap.scale] || SCALES.minor;
+      const scale = SCALES[snap.scale] || SCALES.major;
       // always voice the pad in a fixed low-ish register (octave 3) regardless
       // of the melody's rootOctave drift — pads sound best centered.
       const rootMidi = 12 * 4 + Math.max(0, KEYS.indexOf(snap.key));
@@ -314,7 +314,7 @@ export class Engine {
       if (!snap) return;
       if (snap.phase === 'sleeping') return;
       const chordRoot = currentChordRoot(snap, Date.now());
-      const scale = SCALES[snap.scale] || SCALES.minor;
+      const scale = SCALES[snap.scale] || SCALES.major;
       const rootMidi = 12 * ((snap.rootOctave || 3) + 1) + Math.max(0, KEYS.indexOf(snap.key));
       // triad from the current chord
       const chord = [0, 2, 4].map(p => {
@@ -528,7 +528,7 @@ export class Engine {
 
     // pulse on the current chord's root rather than always the key's tonic —
     // keeps the low end in harmony with the progression
-    const scale = SCALES[s.scale] || SCALES.minor;
+    const scale = SCALES[s.scale] || SCALES.major;
     const chordRoot = currentChordRoot(s, Date.now());
     const deg = ((chordRoot % scale.length) + scale.length) % scale.length;
     const keyIdx = Math.max(0, KEYS.indexOf(s.key));

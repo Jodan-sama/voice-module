@@ -7,37 +7,61 @@
 // ——— musical vocabulary ———
 export const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const SCALES = {
-  minor:      [0, 2, 3, 5, 7, 8, 10],
-  dorian:     [0, 2, 3, 5, 7, 9, 10],
-  phrygian:   [0, 1, 3, 5, 7, 8, 10],
-  lydian:     [0, 2, 4, 6, 7, 9, 11],
-  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  major:      [0, 2, 4, 5, 7, 9, 11],
   majpent:    [0, 2, 4, 7, 9],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  lydian:     [0, 2, 4, 6, 7, 9, 11],
+  dorian:     [0, 2, 3, 5, 7, 9, 10],
+  minor:      [0, 2, 3, 5, 7, 8, 10],
   minpent:    [0, 3, 5, 7, 10],
+  phrygian:   [0, 1, 3, 5, 7, 8, 10],
   hirajoshi:  [0, 2, 3, 7, 8],
-  whole:      [0, 2, 4, 6, 8, 10],
 };
-const SCALE_NAMES = Object.keys(SCALES);
-export const ARP_PATTERNS = ['up', 'down', 'updown', 'random', 'converge', 'alt'];
+// weighted scale pool — major-ish scales appear many times, darker/exotic rarely
+const SCALE_POOL = [
+  'major', 'major', 'major', 'major',
+  'majpent', 'majpent', 'majpent',
+  'mixolydian', 'mixolydian', 'mixolydian',
+  'lydian', 'lydian',
+  'dorian', 'dorian',
+  'minor', 'minor',
+  'minpent',
+  'phrygian',
+  'hirajoshi',
+];
+export const ARP_PATTERNS = ['up', 'updown', 'down', 'alt'];
+// weighted arp pool — 'up' and 'updown' dominate, feels like a song phrase
+const ARP_POOL = [
+  'up', 'up', 'up', 'up', 'up',
+  'updown', 'updown', 'updown', 'updown',
+  'down', 'down',
+  'alt',
+];
 const EFFECT_NAMES = [
   'reverb', 'delay', 'chorus', 'filter', 'pingpong', 'tremolo',
   'phaser', 'autofilter', 'vibrato', 'pitchshift',
   'bitcrush',  // last — also weighted lower at pick time
 ];
 
-// pleasing progressions in scale degrees — work across minor/dorian/etc.
-// (roots are 0-indexed scale degrees: 0=i, 1=ii, 2=iii, …)
+// pleasing progressions in scale degrees — work across major/dorian/etc.
+// (roots are 0-indexed scale degrees: 0=I, 1=ii, 2=iii, …)
+// list is used as a weighted pool — duplicates = higher odds of being picked.
 const PROGRESSIONS = [
-  [0, 5, 3, 4],       // i  –  vi – iv – v     (lofi classic)
-  [0, 3, 4, 0],       // i  –  iv – v  – i
-  [0, 5, 6, 4],       // i  –  vi – vii – v
-  [0, 6, 3, 4],       // i  –  vii – iv – v
-  [0, 4, 5, 3],       // i  –  v  – vi – iv    (andalusian-ish)
-  [0, 2, 5, 4],       // i  –  iii – vi – v
-  [0, 5, 3, 6],       // i  –  vi – iv – vii
-  [0, 2, 3, 4],       // stepwise climb
-  [0, 0, 3, 4],       // tonic pedal then cadence
-  [0, 3, 0, 4],       // i-iv-i-v
+  // pop "axis" family — play these a lot
+  [0, 4, 5, 3],   // I – V  – vi – IV   (axis of awesome)
+  [0, 4, 5, 3],
+  [0, 5, 3, 4],   // I – vi – IV – V    (doo-wop)
+  [0, 5, 3, 4],
+  [0, 3, 4, 0],   // I – IV – V  – I
+  [0, 3, 4, 0],
+  [5, 3, 0, 4],   // vi – IV – I – V
+  [0, 3, 5, 4],   // I – IV – vi – V
+  // modal / anthem
+  [0, 6, 3, 4],   // I – bVII – IV – V
+  [0, 3, 0, 4],   // I – IV – I – V
+  // quieter motion
+  [0, 2, 5, 4],   // I – iii – vi – V
+  [0, 0, 3, 4],   // tonic pedal then cadence
 ];
 
 export const VOICE_NAMES = [
@@ -54,22 +78,22 @@ const chance = (p) => Math.random() < p;
 export function createInitialState(now = Date.now()) {
   return {
     key: pick(KEYS),
-    scale: pick(SCALE_NAMES),
+    scale: pick(SCALE_POOL),                   // weighted toward major/pentatonic
     tempoBpm: Math.round(rand(84, 118)),
     rootOctave: randi(2, 3),                   // 2–3 at birth; drifts 2–4 later
-    arpPattern: pick(ARP_PATTERNS),
-    arpSteps: randi(6, 12),
+    arpPattern: pick(ARP_POOL),                // weighted toward up/updown
+    arpSteps: randi(4, 8),                     // narrow — short phrases read as phrases
     arpGate: rand(0.35, 0.75),
     arpSubdivision: pick([8, 8, 16, 16, 16]),
     restProb: rand(0.12, 0.28),
-    swing: chance(0.4) ? rand(0.2, 0.55) : 0,  // sometimes swings, sometimes straight
+    swing: chance(0.4) ? rand(0.2, 0.55) : 0,
     swingSubdivision: pick([8, 16]),
-    burstProb: rand(0.0, 0.10),                // some steps fire a sub-note at double speed
+    burstProb: rand(0.0, 0.10),
     progression: pick(PROGRESSIONS).slice(),
-    beatsPerChord: pick([4, 4, 8, 8, 16]),
+    beatsPerChord: pick([8, 8, 16, 16]),       // longer holds — more room for phrase repetition
     progressionAnchorAt: now,
     effects: spawnEffects(),
-    secondaryMelody: null,                     // spawned/cleared over time; see shiftSecondary
+    secondaryMelody: null,
     backgroundRhythm: spawnRhythm(),
     phase: 'waking',
     phaseUntil: now + randi(10, 25) * 1000,
@@ -77,7 +101,7 @@ export function createInitialState(now = Date.now()) {
     sampleTriggerRate: rand(0.45, 0.92),
     voiceTarget: randomVoiceTarget(),
     bornAt: now,
-    version: 3,
+    version: 4,
   };
 }
 
@@ -126,12 +150,20 @@ function spawnRhythm() {
 }
 
 function randomVoiceTarget() {
-  // 2-3 voices active with weights, others 0. creates a timbral identity
-  // that evolves but never lets too many voices compete at once.
+  // 2-3 voices active with weights, others 0. marimba is favored — it reads
+  // as 'catchy' and grounds pop-style arp lines, so it lands in ~60% of blends.
   const n = randi(2, 3);
-  const pool = [...VOICE_NAMES];
   const blend = Object.fromEntries(VOICE_NAMES.map(v => [v, 0]));
-  for (let i = 0; i < n && pool.length; i++) {
+  const pool = [...VOICE_NAMES];
+  let remaining = n;
+
+  if (chance(0.6)) {
+    blend.marimba = rand(0.6, 1.0);
+    const idx = pool.indexOf('marimba');
+    if (idx >= 0) pool.splice(idx, 1);
+    remaining--;
+  }
+  for (let i = 0; i < remaining && pool.length; i++) {
     const idx = (Math.random() * pool.length) | 0;
     const v = pool.splice(idx, 1)[0];
     blend[v] = rand(0.45, 1.0);
@@ -141,7 +173,7 @@ function randomVoiceTarget() {
 
 // ——— evolution step. Returns true if `state` was mutated. ———
 export function tickEvolution(state, now = Date.now()) {
-  if (!state || state.version !== 3) {
+  if (!state || state.version !== 4) {
     // either brand new or older schema — regenerate, but keep bornAt if present
     const bornAt = state?.bornAt || now;
     Object.assign(state, createInitialState(now));
@@ -218,13 +250,15 @@ function shiftEffect(state) {
 }
 
 function shiftArp(state) {
-  if (chance(0.5)) state.arpPattern     = pick(ARP_PATTERNS);
-  if (chance(0.5)) state.arpSteps       = clamp((state.arpSteps ?? 8) + randi(-2, 2), 4, 16);
-  if (chance(0.4)) state.arpGate        = clamp((state.arpGate ?? 0.5) + rand(-0.2, 0.2), 0.15, 1.1);
-  if (chance(0.3)) state.arpSubdivision = pick([8, 8, 16, 16, 16]);
-  if (chance(0.25)) state.restProb      = clamp((state.restProb ?? 0.2) + rand(-0.12, 0.12), 0.05, 0.5);
-  if (chance(0.2)) state.tempoBpm       = clamp((state.tempoBpm ?? 96) + randi(-6, 6), 70, 128);
-  if (chance(0.3)) state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.7) + rand(-0.2, 0.2), 0.45, 0.98);
+  // less-frequent pattern change so phrases repeat more; use weighted pool
+  if (chance(0.35)) state.arpPattern     = pick(ARP_POOL);
+  // narrower steps range — song-length phrases feel catchier than 14-step runs
+  if (chance(0.4))  state.arpSteps       = clamp((state.arpSteps ?? 6) + randi(-1, 1), 4, 8);
+  if (chance(0.4))  state.arpGate        = clamp((state.arpGate ?? 0.5) + rand(-0.2, 0.2), 0.2, 1.0);
+  if (chance(0.25)) state.arpSubdivision = pick([8, 8, 16, 16, 16]);
+  if (chance(0.25)) state.restProb       = clamp((state.restProb ?? 0.2) + rand(-0.12, 0.12), 0.05, 0.45);
+  if (chance(0.2))  state.tempoBpm       = clamp((state.tempoBpm ?? 96) + randi(-6, 6), 70, 128);
+  if (chance(0.3))  state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.7) + rand(-0.2, 0.2), 0.45, 0.98);
 }
 
 function shiftVoices(state) {
@@ -258,10 +292,10 @@ function shiftKey(state) {
   const idx = KEYS.indexOf(state.key);
   const shifts = [-5, -2, 2, 3, 5, 7];
   state.key = KEYS[((idx >= 0 ? idx : 0) + pick(shifts) + 12) % 12];
-  if (chance(0.4)) state.scale = pick(SCALE_NAMES);
+  if (chance(0.4)) state.scale = pick(SCALE_POOL);
   // occasionally drift the root octave down a couple or up one — range 2..4
   if (chance(0.35)) {
-    const step = pick([-2, -1, -1, -1, 1]);   // weighted to go lower
+    const step = pick([-2, -1, -1, -1, 1]);
     state.rootOctave = clamp((state.rootOctave ?? 3) + step, 2, 4);
   }
 }
@@ -297,7 +331,7 @@ function shiftSecondary(state) {
       state.secondaryMelody = spawnSecondary(state);   // full replace, different voice/fx
     } else {
       const next = { ...sec };
-      if (chance(0.5)) next.pattern      = pick(ARP_PATTERNS);
+      if (chance(0.4)) next.pattern      = pick(ARP_POOL);
       if (chance(0.4)) next.restProb     = clamp((next.restProb ?? 0.3) + rand(-0.1, 0.1), 0.05, 0.6);
       if (chance(0.3)) next.gate         = clamp((next.gate ?? 0.45) + rand(-0.15, 0.15), 0.2, 1.0);
       if (chance(0.3)) next.subdivision  = pick([8, 16]);
@@ -315,7 +349,7 @@ function spawnSecondary(state) {
   const contrast = VOICE_NAMES.filter(v => !dominant.includes(v));
   const voice = pick(contrast.length ? contrast : VOICE_NAMES);
   return {
-    pattern:      pick(ARP_PATTERNS),
+    pattern:      pick(ARP_POOL),
     steps:        randi(4, 8),
     subdivision:  pick([8, 16]),
     gate:         rand(0.3, 0.6),
@@ -374,10 +408,11 @@ export function currentChordRoot(state, now = Date.now()) {
 }
 
 // chord-tone aware MIDI note for a given arp step + chord root
-// uses a 7th chord voicing [root, 3rd, 5th, 7th] cycled across octaves.
+// uses a triad-plus-octave voicing [root, 3rd, 5th, octave-root] — classic
+// arpeggiator shape, pop-clean, no dissonant 7ths.
 export function chordNoteMidi(state, chordRootDeg, step) {
-  const scale = SCALES[state.scale] || SCALES.minor;
-  const chordPositions = [0, 2, 4, 6];
+  const scale = SCALES[state.scale] || SCALES.major;
+  const chordPositions = [0, 2, 4, 7];  // root, 3rd, 5th, octave up
   const nPos = chordPositions.length;
   const octInArp = Math.floor(step / nPos);
   const posIdx = ((step % nPos) + nPos) % nPos;

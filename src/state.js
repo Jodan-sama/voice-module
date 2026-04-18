@@ -176,6 +176,37 @@ async function persistNow() {
   if (error) console.warn('[living] soul persist failed', error);
 }
 
+// When the soul enters 'sleeping' we may reach out to the cloud for an older
+// elder fragment that isn't currently in the local pool. Adding it surfaces
+// a voice we wouldn't otherwise hear and triggers the mint tint during the
+// single breath of silence.
+let _summoning = false;
+export async function summonElderSample() {
+  if (_summoning) return null;
+  _summoning = true;
+  try {
+    const { data, error } = await supabase
+      .from('samples')
+      .select('*')
+      .gt('lifespan_ms', SAMPLE_LIFESPAN_MS)     // only long-tier fragments qualify
+      .order('created_at', { ascending: true })  // oldest first — mysterious ghosts
+      .limit(24);
+    if (error || !data?.length) return null;
+    const currentIds = new Set(samples.map((s) => s.id));
+    const unseen = data.filter((s) => !currentIds.has(s.id));
+    if (!unseen.length) return null;
+    const picked = unseen[Math.floor(Math.random() * unseen.length)];
+    samples = [withUrl(picked), ...samples];
+    emit('sample', samples);
+    return picked;
+  } catch (err) {
+    console.warn('[living] summon elder failed', err);
+    return null;
+  } finally {
+    _summoning = false;
+  }
+}
+
 async function leaderCull() {
   if (!isLeader) return;
   // fetch all and filter client-side — each sample carries its own lifespan now

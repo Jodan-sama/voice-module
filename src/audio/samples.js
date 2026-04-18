@@ -103,7 +103,7 @@ export class SampleBank {
     if (r < 0.15 && duration >= 1.6) {
       const longMax = Math.min(4.0, duration * 0.9);
       fragLen = 1.5 + Math.random() * Math.max(0, longMax - 1.5);
-      velocity *= 0.7;
+      velocity *= 0.85;   // soften long fragments a touch (was 0.7 — too quiet)
     } else if (r < 0.65) {
       const minLen = 0.4;
       const maxLen = Math.min(1.8, duration * 0.9);
@@ -113,6 +113,9 @@ export class SampleBank {
       const maxLen = Math.min(0.3, duration * 0.9);
       fragLen = minLen + Math.pow(Math.random(), 1.5) * (maxLen - minLen);
     }
+    // floor the effective velocity so no voice fragment ever lands
+    // inaudible — minimum ~-6 dB pre-makeup so voices always sit up.
+    const effectiveVelocity = Math.max(0.5, velocity);
     const start = Math.random() * Math.max(0.0001, duration - fragLen - 0.01);
 
     // scale fades to fragment length so micro stutters don't get swallowed
@@ -135,7 +138,7 @@ export class SampleBank {
       : -0.15 + Math.random() * 0.3;
     const pan = new Tone.Panner(panPos);
     // +5 dB makeup so voices sit on top of the bed instead of behind it
-    const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity)) + 5).connect(dest);
+    const vol = new Tone.Volume(Tone.gainToDb(effectiveVelocity) + 5).connect(dest);
     player.connect(pan);
     pan.connect(vol);
     const t = when ?? Tone.now();

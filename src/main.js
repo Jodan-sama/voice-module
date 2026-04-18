@@ -153,15 +153,22 @@ recordBtn.addEventListener('click', startAudio, { capture: true });
 
 // show phase in the status line
 state.on('phase', (phase) => {
-  if (!audioReady) return;
-  const word = {
-    waking: 'stirring',
-    awake: 'playing',
-    breathing: 'breathing',
-    sleeping: 'dreaming',
-  }[phase] || phase;
-  status.textContent = word;
-  setTimeout(() => { if (status.textContent === word) status.textContent = hint.textContent; }, 3500);
+  if (audioReady) {
+    const word = {
+      waking: 'stirring',
+      awake: 'playing',
+      breathing: 'breathing',
+      sleeping: 'dreaming',
+    }[phase] || phase;
+    status.textContent = word;
+    setTimeout(() => { if (status.textContent === word) status.textContent = hint.textContent; }, 3500);
+  }
+  // on entering 'dreaming', reach into the cloud for an old elder fragment.
+  // surfacing it during the silence gives a lingering voice a chance to
+  // briefly tint the room mint, even if we hadn't loaded that one before.
+  if (phase === 'sleeping' && Math.random() < 0.75) {
+    state.summonElderSample().catch(() => {});
+  }
 });
 
 initRecord({ button: recordBtn, status });

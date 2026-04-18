@@ -178,20 +178,40 @@ async function persistNow() {
 
 async function leaderCull() {
   if (!isLeader) return;
-  const cutoff = new Date(Date.now() - SAMPLE_LIFESPAN_MS).toISOString();
-  const { data: dead, error } = await supabase
+  // fetch all and filter client-side — each sample carries its own lifespan now
+  const { data: all, error } = await supabase
     .from('samples')
-    .select('id, path')
-    .lt('created_at', cutoff);
+    .select('id, path, created_at, lifespan_ms');
   if (error) return console.warn('[living] cull query failed', error);
-  if (!dead?.length) return;
-  const ids = dead.map(d => d.id);
-  const paths = dead.map(d => d.path).filter(Boolean);
+  const now = Date.now();
+  const dead = (all || []).filter((s) => {
+    const age = now - new Date(s.created_at).getTime();
+    const span = Number(s.lifespan_ms) || SAMPLE_LIFESPAN_MS;
+    return age > span;
+  });
+  if (!dead.length) return;
+  const ids = dead.map((d) => d.id);
+  const paths = dead.map((d) => d.path).filter(Boolean);
   await supabase.from('samples').delete().in('id', ids);
   if (paths.length) await supabase.storage.from('fragments').remove(paths);
 }
 
 // ——— uploads ———
+
+// preservation tiers — most fragments are ephemeral, a rare few last a very long time
+const HOUR = 3600_000;
+const DAY  = 24 * HOUR;
+const LIFESPAN_TIERS = [
+  { threshold: 0.005, ms: 365 * DAY, label: 'kept for a year' },
+  { threshold: 0.030, ms:  30 * DAY, label: 'kept for a month' },
+  { threshold: 0.100, ms:   7 * DAY, label: 'kept for a week' },
+  { threshold: 0.250, ms:       DAY, label: 'kept for a day' },
+];
+function rollLifespan() {
+  const r = Math.random();
+  for (const t of LIFESPAN_TIERS) if (r < t.threshold) return { ms: t.ms, label: t.label };
+  return { ms: SAMPLE_LIFESPAN_MS, label: 'woven in' };
+}
 
 export async function uploadSample(blob, mime, duration) {
   const id = crypto.randomUUID();
@@ -208,16 +228,17 @@ export async function uploadSample(blob, mime, duration) {
     console.error('[living] storage upload failed', upErr);
     throw new Error(`upload: ${upErr.message || upErr.error || 'unknown'}`);
   }
+  const { ms: lifespan_ms, label } = rollLifespan();
   const { data, error } = await supabase
     .from('samples')
-    .insert({ path, mime: baseMime, duration })
+    .insert({ path, mime: baseMime, duration, lifespan_ms })
     .select()
     .single();
   if (error) {
     console.error('[living] samples insert failed', error);
     throw new Error(`insert: ${error.message || 'unknown'}`);
   }
-  return data;
+  return { ...data, label };
 }
 
 // ——— helpers ———

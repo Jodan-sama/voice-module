@@ -284,11 +284,14 @@ export function chordNoteMidi(state, chordRootDeg, step) {
   return rootMidi + scale[scaleDeg] + 12 * (octInArp + octFromWrap);
 }
 
-// ——— sample life: derived from created_at, so we never persist it ———
+// ——— sample life: derived from created_at + per-sample lifespan ———
+// default is 3h; upload rolls dice and occasionally mints a day / week / month / year fragment.
 export const SAMPLE_LIFESPAN_MS = 3 * 60 * 60 * 1000; // 3 hours
 export function sampleLife(sample, now = Date.now()) {
-  const age = now - new Date(sample.created_at).getTime();
-  return Math.max(0, 1 - age / SAMPLE_LIFESPAN_MS);
+  const created = new Date(sample.created_at).getTime();
+  const span = Number(sample.lifespan_ms) || SAMPLE_LIFESPAN_MS;
+  const age = now - created;
+  return Math.max(0, 1 - age / span);
 }
 
 function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }

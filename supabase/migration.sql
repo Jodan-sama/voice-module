@@ -22,12 +22,17 @@ on conflict (id) do nothing;
 
 -- voice fragments
 create table if not exists public.samples (
-  id         uuid primary key default gen_random_uuid(),
-  path       text not null,                          -- object path inside the 'fragments' bucket
-  mime       text not null default 'audio/webm',
-  duration   real not null default 5.0,
-  created_at timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  path        text not null,                          -- object path inside the 'fragments' bucket
+  mime        text not null default 'audio/webm',
+  duration    real not null default 5.0,
+  lifespan_ms bigint not null default 10800000,       -- 3h baseline; see uploadSample for tiers
+  created_at  timestamptz not null default now()
 );
+
+-- if the table pre-dates this column, add it (safe to re-run)
+alter table public.samples
+  add column if not exists lifespan_ms bigint not null default 10800000;
 
 create index if not exists samples_created_at_idx on public.samples (created_at desc);
 

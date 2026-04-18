@@ -44,9 +44,12 @@ export function initRecord({ button, status }) {
       const duration = (performance.now() - started) / 1000;
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
       status.textContent = 'weaving…';
-      await state.uploadSample(blob, blob.type, duration);
-      status.textContent = 'woven in';
-      setTimeout(() => { status.textContent = originalHint; }, 1800);
+      const sample = await state.uploadSample(blob, blob.type, duration);
+      const label = sample?.label || 'woven in';
+      const rare = label !== 'woven in';
+      status.textContent = label;
+      // long-lived fragments deserve to linger on screen a moment
+      setTimeout(() => { status.textContent = originalHint; }, rare ? 6000 : 1800);
     } catch (err) {
       console.error('[record] failed', err);
       let msg;

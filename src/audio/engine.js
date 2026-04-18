@@ -123,12 +123,6 @@ export class Engine {
     this.tailReverb = null;
     this.tailGain = null;
     this.voices = {};        // name -> { synth, gain, target, current }
-    this.padSynth = null;
-    this.ambientPadSynth = null;
-    this.ambientPadFilter = null;
-    this.ambientPadLFO = null;
-    this.ambientPadGain = null;
-    this._ambientPadLastChord = null;
     this.rhythmSynth = null;
     this.samples = new SampleBank();
     this.arpIdx = 0;
@@ -195,15 +189,6 @@ export class Engine {
       this.voices[name] = { synth, gain, target: 0, current: 0 };
     }
 
-    // background pad — slower harmonic bed, underlines each chord
-    this.padSynth = new Tone.PolySynth(Tone.AMSynth, {
-      harmonicity: 1.5,
-      modulationIndex: 2,
-      envelope: { attack: 2.5, decay: 1, sustain: 0.85, release: 4 },
-      modulationEnvelope: { attack: 3, decay: 1, sustain: 0.8, release: 4 },
-      volume: -22,
-    }).connect(this.effects.input);
-
     // low sub/click rhythm
     this.rhythmSynth = new Tone.MembraneSynth({
       pitchDecay: 0.08,
@@ -211,34 +196,6 @@ export class Engine {
       envelope: { attack: 0.002, decay: 0.35, sustain: 0 },
       volume: -22,
     }).connect(this.master);
-
-    // ambient sweeping pad: fat detuned saws held on the current chord,
-    // gently swept by a slow LFO on a lowpass filter. connected through
-    // breathGain so it rises and falls with everything else, plus a send
-    // to the persistent reverb tail for extra wash.
-    this.ambientPadSynth = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: 'fatsawtooth', count: 3, spread: 22 },
-      envelope: { attack: 3.2, decay: 2.0, sustain: 0.85, release: 6.0 },
-      volume: -15,                                 // boosted so it's actually audible
-    });
-    this.ambientPadFilter = new Tone.Filter({
-      frequency: 700,
-      type: 'lowpass',
-      Q: 0.7,
-      rolloff: -24,
-    });
-    this.ambientPadLFO = new Tone.LFO({
-      frequency: 0.035,
-      min: 400,
-      max: 2100,
-      type: 'sine',
-    }).start();
-    this.ambientPadLFO.connect(this.ambientPadFilter.frequency);
-    this.ambientPadGain = new Tone.Gain(1.0);
-    this.ambientPadSynth.connect(this.ambientPadFilter);
-    this.ambientPadFilter.connect(this.ambientPadGain);
-    this.ambientPadGain.connect(this.breathGain);
-    this.ambientPadGain.connect(this.tailBus);
 
     // apply current soul state
     const snap = state.snapshot();
@@ -251,8 +208,6 @@ export class Engine {
     Tone.Transport.bpm.value = snap?.tempoBpm ?? 96;
     this._scheduleArp(snap?.arpSubdivision ?? 16);
     this._scheduleRhythm();
-    this._schedulePad();
-    this._scheduleAmbientPad();
 
     Tone.Transport.start('+0.05');
   }
@@ -266,71 +221,6 @@ export class Engine {
   _scheduleRhythm() {
     if (this.rhythmLoop) { this.rhythmLoop.dispose(); this.rhythmLoop = null; }
     this.rhythmLoop = new Tone.Loop((time) => this._onRhythmTick(time), '16n').start(0);
-  }
-
-  _scheduleAmbientPad() {
-    // Watches for chord-root changes and retriggers a sustained chord on
-    // the ambient pad with overlap between release (6s) and attack (3s).
-    // never fires while sleeping so it doesn't sustain into the quiet.
-    const check = (time) => {
-      const snap = state.snapshot();
-      if (!snap) return;
-      if (snap.phase === 'sleeping') {
-        if (this._ambientPadLastChord !== null) {
-          try { this.ambientPadSynth.releaseAll(time); } catch {}
-          this._ambientPadLastChord = null;
-        }
-        return;
-      }
-      const chordRoot = currentChordRoot(snap, Date.now());
-      if (chordRoot === this._ambientPadLastChord) return;
-
-      const scale = SCALES[snap.scale] || SCALES.major;
-      // always voice the pad in a fixed low-ish register (octave 3) regardless
-      // of the melody's rootOctave drift — pads sound best centered.
-      const rootMidi = 12 * 4 + Math.max(0, KEYS.indexOf(snap.key));
-      // root + 3rd + 5th + octave: a wide, open voicing
-      const chord = [0, 2, 4, 7].map(pos => {
-        const step = chordRoot + pos;
-        const deg = ((step % scale.length) + scale.length) % scale.length;
-        const oct = Math.floor(step / scale.length);
-        const midi = rootMidi + scale[deg] + 12 * oct;
-        return Tone.Frequency(midi, 'midi').toNote();
-      });
-
-      try {
-        this.ambientPadSynth.releaseAll(time);
-        this.ambientPadSynth.triggerAttack(chord, time + 0.08, 0.35);
-      } catch {}
-      this._ambientPadLastChord = chordRoot;
-    };
-    // poll every half note for chord changes
-    new Tone.Loop(check, '2n').start(0.25);
-  }
-
-  _schedulePad() {
-    const trigger = (time) => {
-      const snap = state.snapshot();
-      if (!snap) return;
-      if (snap.phase === 'sleeping') return;
-      const chordRoot = currentChordRoot(snap, Date.now());
-      const scale = SCALES[snap.scale] || SCALES.major;
-      const rootMidi = 12 * ((snap.rootOctave || 3) + 1) + Math.max(0, KEYS.indexOf(snap.key));
-      // triad from the current chord
-      const chord = [0, 2, 4].map(p => {
-        const step = chordRoot + p;
-        const deg = ((step % scale.length) + scale.length) % scale.length;
-        const oct = Math.floor(step / scale.length);
-        const midi = rootMidi + scale[deg] + 12 * oct;
-        return Tone.Frequency(midi, 'midi').toNote();
-      });
-      try { this.padSynth.triggerAttackRelease(chord, '2n', time, 0.22); } catch {}
-    };
-    const schedule = () => {
-      const when = Tone.Transport.now() + (2 + Math.random() * 6);
-      Tone.Transport.scheduleOnce((t) => { trigger(t); schedule(); }, when);
-    };
-    schedule();
   }
 
   // —————— per-arp-step ——————

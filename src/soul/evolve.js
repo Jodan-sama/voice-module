@@ -40,7 +40,10 @@ const PROGRESSIONS = [
   [0, 3, 0, 4],       // i-iv-i-v
 ];
 
-export const VOICE_NAMES = ['triangle', 'sine', 'square', 'pluck', 'bell', 'soft'];
+export const VOICE_NAMES = [
+  'triangle', 'sine', 'square', 'pluck', 'bell', 'soft',
+  'marimba', 'glass', 'organ', 'epiano', 'flute',
+];
 
 const rand  = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));

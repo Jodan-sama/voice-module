@@ -70,6 +70,44 @@ const VOICE_FACTORIES = {
     envelope: { attack: 0.6, decay: 0.3, sustain: 0.7, release: 2.8 },
     volume: -14,
   }),
+  // —— new patches ——
+  marimba: () => new Tone.PolySynth(Tone.FMSynth, {
+    harmonicity: 4.01,
+    modulationIndex: 12,
+    oscillator: { type: 'sine' },
+    modulation: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.9, sustain: 0, release: 0.4 },
+    modulationEnvelope: { attack: 0.002, decay: 0.18, sustain: 0, release: 0.2 },
+    volume: -10,
+  }),
+  glass: () => new Tone.PolySynth(Tone.FMSynth, {
+    harmonicity: 5.5,
+    modulationIndex: 15,
+    oscillator: { type: 'sine' },
+    modulation: { type: 'triangle' },
+    envelope: { attack: 0.002, decay: 2.2, sustain: 0.0, release: 2.4 },
+    modulationEnvelope: { attack: 0.01, decay: 1.2, sustain: 0, release: 1.0 },
+    volume: -18,
+  }),
+  organ: () => new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'fatsine', count: 3, spread: 14 },
+    envelope: { attack: 0.04, decay: 0.08, sustain: 0.85, release: 0.6 },
+    volume: -16,
+  }),
+  epiano: () => new Tone.PolySynth(Tone.FMSynth, {
+    harmonicity: 1,
+    modulationIndex: 6,
+    oscillator: { type: 'triangle' },
+    modulation: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 1.6, sustain: 0.25, release: 1.4 },
+    modulationEnvelope: { attack: 0.001, decay: 0.9, sustain: 0, release: 0.5 },
+    volume: -9,
+  }),
+  flute: () => new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'fmsine', modulationType: 'sine', modulationIndex: 1.2, harmonicity: 1 },
+    envelope: { attack: 0.22, decay: 0.2, sustain: 0.75, release: 1.2 },
+    volume: -12,
+  }),
 };
 
 const CROSSFADE_TAU = 4.5;   // seconds — how long a voice blend takes to settle
@@ -109,7 +147,24 @@ export class Engine {
     try { Tone.context.lookAhead = 0.2; } catch {}
     this.started = true;
 
-    this.master = new Tone.Gain(0.85).toDestination();
+    // master bus with a gentle "glue" compressor and a brickwall limiter.
+    // the compressor is set very light (ratio 1.8, soft knee, low threshold)
+    // so sustained material isn't audibly squashed; it only tames transients
+    // that would otherwise produce clicks. the limiter is a safety net at
+    // -0.8 dB so nothing ever clips the DAC.
+    this.master = new Tone.Gain(0.85);
+    this.glue = new Tone.Compressor({
+      threshold: -18,
+      ratio: 1.8,
+      attack: 0.01,
+      release: 0.18,
+      knee: 18,
+    });
+    this.brickwall = new Tone.Limiter(-0.8);
+    this.master.connect(this.glue);
+    this.glue.connect(this.brickwall);
+    this.brickwall.toDestination();
+
     this.breathGain = new Tone.Gain(1).connect(this.master);
     this.effects = new EffectChain(this.breathGain);
 

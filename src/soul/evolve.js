@@ -183,7 +183,7 @@ function transitionPhase(state, now) {
     waking:    randi(5, 12),
     awake:     randi(40, 180),
     breathing: randi(20, 60),
-    sleeping:  randi(30, 180),
+    sleeping:  randi(5, 15),       // capped at 15s — brief dip, not a full silence
   })[next];
   state.phase = next;
   state.phaseUntil = now + durationSec * 1000;

@@ -516,14 +516,13 @@ export class Engine {
     this._lastAmpT = now;
 
     // phase amplitude changes step-wise when the soul transitions phases.
-    // smooth it asymmetrically — slow fade going quiet, quicker return when waking.
+    // smooth it asymmetrically — very slow fade going quiet, quicker return when waking.
     const targetPhase = p.amp ?? 0.6;
     // initialize loud regardless of current phase, so a listener arriving during
     // a 'sleeping' moment still gets immediate confirmation that audio is alive.
-    // the 20s downward smoothing then settles us into the actual phase level.
     if (this._smoothedAmp == null) this._smoothedAmp = Math.max(0.7, targetPhase);
     const goingDown = targetPhase < this._smoothedAmp;
-    const tau = goingDown ? 20 : 2.5;  // seconds
+    const tau = goingDown ? 35 : 2.5;  // seconds — slow exhale, quick inhale
     if (dt) {
       const alpha = 1 - Math.exp(-dt / tau);
       this._smoothedAmp += (targetPhase - this._smoothedAmp) * alpha;

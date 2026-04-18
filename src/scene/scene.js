@@ -132,15 +132,28 @@ export function initScene(canvas) {
 
   const clock = new THREE.Clock();
   let t0 = 0;
+  // smoothed copies of amp + awake-ness so phase transitions glide instead of
+  // snapping. asymmetric tau matches the audio engine: slow fade out, fast wake up.
+  let smoothedAmp = null;
+  let smoothedAwake = null;
 
   function render() {
     const dt = clock.getDelta();
     t0 += dt;
 
-    // breath drives membrane scale + opacity + light intensity
     const breath = pulse.breath ?? 0.5;
-    const amp = pulse.amp ?? 0.6;
-    const phaseAwake = pulse.phase === 'awake' || pulse.phase === 'waking' ? 1 : pulse.phase === 'breathing' ? 0.5 : 0.15;
+    const rawAmp = pulse.amp ?? 0.6;
+    const rawAwake = pulse.phase === 'awake' || pulse.phase === 'waking' ? 1 : pulse.phase === 'breathing' ? 0.5 : 0.15;
+
+    if (smoothedAmp == null) smoothedAmp = rawAmp;
+    if (smoothedAwake == null) smoothedAwake = rawAwake;
+    const ampTau   = rawAmp   < smoothedAmp   ? 35 : 2.5;
+    const awakeTau = rawAwake < smoothedAwake ? 35 : 2.5;
+    smoothedAmp   += (rawAmp   - smoothedAmp)   * (1 - Math.exp(-dt / ampTau));
+    smoothedAwake += (rawAwake - smoothedAwake) * (1 - Math.exp(-dt / awakeTau));
+
+    const amp = smoothedAmp;
+    const phaseAwake = smoothedAwake;
 
     const membraneScale = 0.85 + breath * 0.3;
     membrane.scale.setScalar(membraneScale);
@@ -179,8 +192,8 @@ export function initScene(canvas) {
     camera.position.z = d;
     camera.lookAt(0, 0, 0);
 
-    // shell tint shifts with phase
-    const shellWarm = pulse.phase === 'sleeping' ? 0.85 : pulse.phase === 'breathing' ? 0.92 : 1.0;
+    // shell tint shifts with phase — derive from smoothed awake so it glides too
+    const shellWarm = 0.85 + phaseAwake * 0.15;
     shellMat.attenuationDistance = 1.1 + breath * 0.8;
     shellMat.opacity = 0.85 + phaseAwake * 0.1 * shellWarm;
 

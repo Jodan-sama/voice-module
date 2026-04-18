@@ -69,16 +69,16 @@ export class SampleBank {
     if (duration <= 0.05) return;
 
     // Three-bucket length distribution:
-    //   50%  micro   — 60ms–300ms chopped stutter-like grains
-    //   35%  medium  — 400ms–1.8s, the 'slightly longer' feel
     //   15%  long    — 1.5s–4s capped to recording length
+    //   50%  medium  — 400ms–1.8s, the 'slightly longer' feel
+    //   35%  micro   — 60ms–300ms chopped stutter-like grains
     const r = Math.random();
     let fragLen;
     if (r < 0.15 && duration >= 1.6) {
       const longMax = Math.min(4.0, duration * 0.9);
       fragLen = 1.5 + Math.random() * Math.max(0, longMax - 1.5);
       velocity *= 0.7;
-    } else if (r < 0.50) {
+    } else if (r < 0.65) {
       const minLen = 0.4;
       const maxLen = Math.min(1.8, duration * 0.9);
       fragLen = minLen + Math.pow(Math.random(), 1.3) * (maxLen - minLen);

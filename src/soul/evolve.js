@@ -181,7 +181,7 @@ function transitionPhase(state, now) {
   const next = rotation[state.phase] || 'awake';
   const durationSec = ({
     waking:    randi(5, 12),
-    awake:     randi(40, 180),
+    awake:     randi(80, 360),
     breathing: randi(20, 60),
     // standard sleep 5–60s; 20% of the time a deeper sleep 30–90s.
     sleeping:  chance(0.2) ? randi(30, 90) : randi(5, 60),

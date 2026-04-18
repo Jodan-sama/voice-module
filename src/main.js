@@ -66,7 +66,15 @@ function ensureSilentEl() {
   return silentEl;
 }
 
+function setPlaybackSession() {
+  // iOS 17+: explicitly declare we're doing media playback, not a call.
+  // prevents the low-end-drops-out-after-recording bug by keeping the OS
+  // from ever switching the session into 'play-and-record' mode.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+}
+
 function syncUnlock() {
+  setPlaybackSession();
   const ctx = rawCtx();
   if (!ctx) return;
   // 1. play silent <audio> on the page so iOS opens the speaker route

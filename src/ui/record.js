@@ -48,9 +48,16 @@ export function initRecord({ button, status }) {
       status.textContent = 'woven in';
       setTimeout(() => { status.textContent = originalHint; }, 1800);
     } catch (err) {
-      console.error(err);
-      status.textContent = err.name === 'NotAllowedError' ? 'mic denied' : 'couldn\'t record';
-      setTimeout(() => { status.textContent = originalHint; }, 2200);
+      console.error('[record] failed', err);
+      let msg;
+      if (err?.name === 'NotAllowedError')        msg = 'mic denied';
+      else if (err?.name === 'NotFoundError')     msg = 'no mic found';
+      else if (/upload/i.test(err?.message || '')) msg = 'upload rejected — see console';
+      else if (/insert/i.test(err?.message || '')) msg = 'save failed — see console';
+      else if (err?.message)                      msg = err.message.slice(0, 60).toLowerCase();
+      else                                         msg = 'couldn\'t record';
+      status.textContent = msg;
+      setTimeout(() => { status.textContent = originalHint; }, 4000);
     } finally {
       button.classList.remove('active');
       busy = false;

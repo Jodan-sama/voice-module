@@ -84,13 +84,14 @@ create policy "samples delete" on public.samples for delete using (true);
 -- ---------- storage ----------
 
 -- public 'fragments' bucket, 10 MB cap, audio only
+-- uses audio/* wildcard so codec params (e.g. audio/webm;codecs=opus) pass
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'fragments',
   'fragments',
   true,
   10485760,
-  array['audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','audio/x-wav']
+  array['audio/*']
 )
 on conflict (id) do update set
   public             = excluded.public,

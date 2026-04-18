@@ -195,20 +195,28 @@ async function leaderCull() {
 
 export async function uploadSample(blob, mime, duration) {
   const id = crypto.randomUUID();
-  const ext = extFor(mime);
+  // `audio/webm;codecs=opus` → `audio/webm` so it matches the bucket's allowed list
+  const baseMime = String(mime || 'audio/webm').split(';')[0].trim().toLowerCase();
+  const ext = extFor(baseMime);
   const path = `${id}.${ext}`;
   const { error: upErr } = await supabase.storage.from('fragments').upload(path, blob, {
-    contentType: mime,
+    contentType: baseMime,
     cacheControl: '31536000',
     upsert: false,
   });
-  if (upErr) throw new Error(`upload: ${upErr.message}`);
+  if (upErr) {
+    console.error('[living] storage upload failed', upErr);
+    throw new Error(`upload: ${upErr.message || upErr.error || 'unknown'}`);
+  }
   const { data, error } = await supabase
     .from('samples')
-    .insert({ path, mime, duration })
+    .insert({ path, mime: baseMime, duration })
     .select()
     .single();
-  if (error) throw new Error(`insert: ${error.message}`);
+  if (error) {
+    console.error('[living] samples insert failed', error);
+    throw new Error(`insert: ${error.message || 'unknown'}`);
+  }
   return data;
 }
 

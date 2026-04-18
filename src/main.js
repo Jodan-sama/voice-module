@@ -29,11 +29,49 @@ function rawCtx() {
   return c?.rawContext || c?._context || c;
 }
 
+// Build a silent WAV blob at runtime and stick it on a hidden <audio> tag.
+// On iOS, even when AudioContext.state === 'running', WebAudio output may
+// not reach the speaker unless there is an active HTMLMediaElement playing
+// on the page. This silent loop is the route-opener.
+let silentEl = null;
+function silentWavUrl() {
+  const sr = 8000, samples = 4000;          // 0.5s of silence, 8kHz mono 8-bit
+  const buf = new ArrayBuffer(44 + samples);
+  const v = new DataView(buf);
+  v.setUint32(0, 0x52494646, false);        // RIFF
+  v.setUint32(4, 36 + samples, true);
+  v.setUint32(8, 0x57415645, false);        // WAVE
+  v.setUint32(12, 0x666d7420, false);       // fmt
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true);
+  v.setUint32(28, sr, true);
+  v.setUint16(32, 1, true);
+  v.setUint16(34, 8, true);
+  v.setUint32(36, 0x64617461, false);       // data
+  v.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) v.setUint8(44 + i, 0x80);  // 0x80 = silence for u8 PCM
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function ensureSilentEl() {
+  if (silentEl) return silentEl;
+  silentEl = document.createElement('audio');
+  silentEl.src = silentWavUrl();
+  silentEl.loop = true;
+  silentEl.preload = 'auto';
+  silentEl.setAttribute('playsinline', '');
+  silentEl.style.display = 'none';
+  document.body.appendChild(silentEl);
+  return silentEl;
+}
+
 function syncUnlock() {
   const ctx = rawCtx();
   if (!ctx) return;
-  // silent priming buffer FIRST — order matters on iOS; the buffer is what
-  // actually opens the output node, resume() alone often isn't enough.
+  // 1. play silent <audio> on the page so iOS opens the speaker route
+  try { ensureSilentEl().play().catch(() => {}); } catch {}
+  // 2. play a 1-sample silent buffer through the AudioContext destination
   try {
     const buf = ctx.createBuffer(1, 1, 22050);
     const src = ctx.createBufferSource();
@@ -41,6 +79,7 @@ function syncUnlock() {
     src.connect(ctx.destination);
     src.start(0);
   } catch {}
+  // 3. resume the context
   if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
     try { ctx.resume(); } catch {}
   }

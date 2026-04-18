@@ -1,0 +1,25 @@
+{
+  "name": "voice-module",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A digital living instrument — an ever-evolving collaborative arpeggiator that breathes, sleeps, and remembers fragments of voice.",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/index.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "three": "^0.163.0",
+    "tone": "^15.0.4",
+    "vite": "^5.4.0"
+  }
+}

@@ -1,0 +1,100 @@
+:root {
+  color-scheme: dark;
+  --ink: #e6e8ee;
+  --dim: #7b8191;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: radial-gradient(ellipse at 50% 40%, #0e1218 0%, #05060a 55%, #020305 100%);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#record {
+  position: fixed;
+  left: 50%;
+  bottom: calc(10vh + env(safe-area-inset-bottom, 0));
+  transform: translateX(-50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: transform 250ms ease, background 250ms ease, border-color 250ms ease;
+  z-index: 3;
+}
+#record:hover { background: rgba(255,255,255,0.08); }
+#record:active { transform: translateX(-50%) scale(0.96); }
+#record .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e84a4a;
+  box-shadow: 0 0 0 0 rgba(232, 74, 74, 0.6);
+  transition: transform 400ms ease, background 200ms ease, box-shadow 400ms ease;
+}
+#record.active { border-color: rgba(232, 74, 74, 0.6); }
+#record.active .dot {
+  transform: scale(0.6);
+  border-radius: 3px;
+  background: #ff6b6b;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(232,74,74,0.55); }
+  70%  { box-shadow: 0 0 0 18px rgba(232,74,74,0); }
+  100% { box-shadow: 0 0 0 0 rgba(232,74,74,0); }
+}
+
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(3vh + env(safe-area-inset-bottom, 0));
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.18em;
+  text-transform: lowercase;
+  z-index: 3;
+  pointer-events: none;
+}
+#status {
+  position: fixed;
+  top: 3vh;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.22em;
+  text-transform: lowercase;
+  z-index: 3;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #record .dot, #record.active .dot { animation: none; }
+}

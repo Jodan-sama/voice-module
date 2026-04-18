@@ -32,10 +32,8 @@ function rawCtx() {
 function syncUnlock() {
   const ctx = rawCtx();
   if (!ctx) return;
-  if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
-    try { ctx.resume(); } catch {}
-  }
-  // silent priming buffer — the classic iOS dodge
+  // silent priming buffer FIRST — order matters on iOS; the buffer is what
+  // actually opens the output node, resume() alone often isn't enough.
   try {
     const buf = ctx.createBuffer(1, 1, 22050);
     const src = ctx.createBufferSource();
@@ -43,12 +41,15 @@ function syncUnlock() {
     src.connect(ctx.destination);
     src.start(0);
   } catch {}
+  if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+    try { ctx.resume(); } catch {}
+  }
 }
 
 async function startAudio() {
   if (audioReady) return;
 
-  // sync unlock FIRST — must happen in the gesture
+  // sync unlock FIRST — must happen synchronously in the gesture
   syncUnlock();
 
   if (audioStarting) return;
@@ -56,21 +57,27 @@ async function startAudio() {
 
   try {
     status.textContent = 'unlocking…';
-    await Tone.start();
+
+    // Tone.start()'s underlying resume() can hang forever on some iOS
+    // versions (Safari just never resolves the promise). Race it with a
+    // short timeout — we'll then trust the raw context state instead.
+    await Promise.race([
+      Tone.start().catch(() => {}),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+
+    // belt-and-suspenders: re-do the sync unlock, sometimes one pass isn't enough
+    syncUnlock();
+    await new Promise((r) => setTimeout(r, 200));
 
     if (Tone.context.state !== 'running') {
-      // give the resume a tick to settle, then check again
-      await new Promise((r) => setTimeout(r, 60));
-    }
-    if (Tone.context.state !== 'running') {
-      throw new Error(`blocked (${Tone.context.state}). check ringer switch`);
+      throw new Error(`blocked (${Tone.context.state}) — check ringer switch & try again`);
     }
 
     status.textContent = 'starting…';
-    // hard cap engine start so we never hang silent on screen
     await Promise.race([
       audio.start(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('engine start timed out')), 6000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('engine timed out')), 8000)),
     ]);
 
     audioReady = true;
@@ -82,7 +89,7 @@ async function startAudio() {
     audioStarting = false;
     setTimeout(() => {
       if (!audioReady) status.textContent = 'tap again to listen';
-    }, 4000);
+    }, 4500);
   }
 }
 

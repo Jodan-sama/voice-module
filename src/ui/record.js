@@ -14,6 +14,11 @@ export function initRecord({ button, status }) {
     button.classList.add('active');
     const originalHint = status.textContent;
     try {
+      // Switch the iOS audio session into 'play-and-record' BEFORE asking for
+      // the mic — the 'playback' default we set at startup rejects getUserMedia.
+      // We'll switch back to 'playback' after the stream closes.
+      try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch {}
+
       // Keep voice processing OFF on the mic request. Any of EC/NS/AGC enabled
       // flips iOS into 'voice call' audio-session mode, which AGCs the entire
       // output and glitches playback until the stream closes. It also strips
@@ -25,10 +30,6 @@ export function initRecord({ button, status }) {
           autoGainControl: false,
         },
       });
-
-      // iOS 17+: explicitly say we're still doing playback even while recording,
-      // so the session never enters voice mode and low-end doesn't get filtered.
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
 
       const mime = pickMime();
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
@@ -53,10 +54,6 @@ export function initRecord({ button, status }) {
       await new Promise((resolve) => rec.addEventListener('stop', resolve, { once: true }));
       for (const tr of stream.getTracks()) tr.stop();
 
-      // after the mic closes, reassert playback session and nudge iOS routing
-      // so the low-end filter doesn't linger in 'voice' mode.
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-
       const duration = (performance.now() - started) / 1000;
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
       status.textContent = 'weaving…';
@@ -80,6 +77,9 @@ export function initRecord({ button, status }) {
       status.textContent = msg;
       setTimeout(() => { status.textContent = originalHint; }, 9000);
     } finally {
+      // always revert the iOS session so the low-end filter never lingers,
+      // whether recording succeeded, errored, or was cancelled mid-way
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
       button.classList.remove('active');
       busy = false;
     }

@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { createFerrofluid } from './ferrofluid.js';
 import * as state from '../state.js';
+import { SAMPLE_LIFESPAN_MS } from '../soul/evolve.js';
 
-const ELDER_THRESHOLD_MS = 3 * 60 * 60 * 1000;  // 3 hours — anything older tints the room mint
-
+// elder = a sample minted at a longer-than-default tier (week / month / year / 2y).
+// when one is in the pool, the room remembers and tints mint.
 function hasElderSamples(samples) {
   if (!samples?.length) return false;
-  const now = Date.now();
-  return samples.some((s) => now - new Date(s.created_at).getTime() > ELDER_THRESHOLD_MS);
+  return samples.some((s) => Number(s.lifespan_ms) > SAMPLE_LIFESPAN_MS);
 }
 
 // Minimal 3D stage:

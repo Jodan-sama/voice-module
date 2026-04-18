@@ -62,5 +62,5 @@ Every push to `main` auto-deploys. No server to run.
 ## Notes
 
 - Collaborative by default: no login, anyone can write soul updates and upload fragments. Swap RLS policies for something stricter if you want.
-- Variable sample lifespans: each recording rolls for a preservation tier — most live ~3 hours, but 15% last a day, 7% a week, 2.5% a month, and about 0.5% get kept for a whole year. The tier shows briefly on upload. The leader culls samples once their own lifespan is up (state + storage).
+- Variable sample lifespans: each recording rolls for a preservation tier — most live ~1 day, but 15% last a week, 7% a month, 2.5% a year, and about 0.5% get kept for two whole years. Long-tier rolls show their label on upload (`kept for a week`, etc.); the default tier just says `woven in`. The leader culls samples once their own lifespan is up (state + storage).
 - Safe to open many tabs: presence elects one leader; the rest just listen.

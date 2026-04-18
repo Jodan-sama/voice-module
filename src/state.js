@@ -198,14 +198,14 @@ async function leaderCull() {
 
 // ——— uploads ———
 
-// preservation tiers — most fragments are ephemeral, a rare few last a very long time
+// preservation tiers — most fragments live a day, a rare few last a very long time
 const HOUR = 3600_000;
 const DAY  = 24 * HOUR;
 const LIFESPAN_TIERS = [
-  { threshold: 0.005, ms: 365 * DAY, label: 'kept for a year' },
-  { threshold: 0.030, ms:  30 * DAY, label: 'kept for a month' },
-  { threshold: 0.100, ms:   7 * DAY, label: 'kept for a week' },
-  { threshold: 0.250, ms:       DAY, label: 'kept for a day' },
+  { threshold: 0.005, ms: 2 * 365 * DAY, label: 'kept for two years' },
+  { threshold: 0.030, ms:     365 * DAY, label: 'kept for a year' },
+  { threshold: 0.100, ms:      30 * DAY, label: 'kept for a month' },
+  { threshold: 0.250, ms:       7 * DAY, label: 'kept for a week' },
 ];
 function rollLifespan() {
   const r = Math.random();

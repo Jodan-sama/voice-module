@@ -285,8 +285,8 @@ export function chordNoteMidi(state, chordRootDeg, step) {
 }
 
 // ——— sample life: derived from created_at + per-sample lifespan ———
-// default is 3h; upload rolls dice and occasionally mints a day / week / month / year fragment.
-export const SAMPLE_LIFESPAN_MS = 3 * 60 * 60 * 1000; // 3 hours
+// default is 1 day; upload rolls dice and occasionally mints a week / month / year / two-year fragment.
+export const SAMPLE_LIFESPAN_MS = 24 * 60 * 60 * 1000; // 1 day
 export function sampleLife(sample, now = Date.now()) {
   const created = new Date(sample.created_at).getTime();
   const span = Number(sample.lifespan_ms) || SAMPLE_LIFESPAN_MS;

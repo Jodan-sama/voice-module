@@ -241,7 +241,8 @@ export class Engine {
       const rate = (s.sampleTriggerRate ?? 0.25) * phaseAmp;
       if (Math.random() < rate) {
         const semitones = midi - 60 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -12 : 12) : 0);
-        this.samples.trigger(this.effects.input, semitones, 0.4 + Math.random() * 0.35, time);
+        // velocity bumped from 0.4–0.75 to 0.65–1.0 — voices were sitting too far back
+        this.samples.trigger(this.effects.input, semitones, 0.65 + Math.random() * 0.35, time);
       }
     }
   }

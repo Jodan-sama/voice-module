@@ -80,7 +80,8 @@ export class SampleBank {
       fadeIn: 0.01,
       fadeOut: 0.04,
     });
-    const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity))).connect(dest);
+    // +5 dB makeup so voices sit on top of the bed instead of behind it
+    const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity)) + 5).connect(dest);
     player.connect(vol);
     const t = when ?? Tone.now();
     try {

@@ -183,7 +183,8 @@ function transitionPhase(state, now) {
     waking:    randi(5, 12),
     awake:     randi(40, 180),
     breathing: randi(20, 60),
-    sleeping:  randi(5, 15),       // capped at 15s — brief dip, not a full silence
+    // standard sleep 5–60s; 20% of the time a deeper sleep 30–90s.
+    sleeping:  chance(0.2) ? randi(30, 90) : randi(5, 60),
   })[next];
   state.phase = next;
   state.phaseUntil = now + durationSec * 1000;

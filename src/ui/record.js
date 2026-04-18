@@ -14,8 +14,16 @@ export function initRecord({ button, status }) {
     button.classList.add('active');
     const originalHint = status.textContent;
     try {
+      // Keep voice processing OFF on the mic request. Any of EC/NS/AGC enabled
+      // flips iOS into 'voice call' audio-session mode, which AGCs the entire
+      // output and glitches playback until the stream closes. It also strips
+      // texture from the voice — bad for an artistic instrument.
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
       });
 
       const mime = pickMime();

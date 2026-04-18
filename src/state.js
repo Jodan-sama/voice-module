@@ -19,6 +19,8 @@ const TICK_MS          = 500;
 const PERSIST_MIN_MS   = 1200;   // soonest we'll write to DB after a change
 const PERSIST_MAX_MS   = 15000;  // latest we'll sit on a change
 const CULL_INTERVAL_MS = 60_000; // how often the leader prunes dead samples
+const POOL_TARGET      = 48;     // target size for the local sample pool
+const REALTIME_KEEP_P  = 0.8;    // probability a Realtime-arriving sample joins the pool
 
 const sessionId = crypto.randomUUID();
 
@@ -37,19 +39,92 @@ let pendingWrite = null;
 let lastPersistAt = 0;
 let dirtySince = 0;
 
+// ——— sample pool construction ———
+//
+// The pool is built by uniformly sampling non-elder recordings from the last
+// 24h, then filling any deficit with random elders. This removes the implicit
+// "newest samples dominate" bias and lets older/other-user voices surface
+// equally. The pool is refreshed on every 2nd sleep phase (see main.js) and
+// slowly rotates as Realtime INSERTs probabilistically replace random slots.
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Add a sample row to the local pool, deduplicating by id and keeping the
+// pool size capped at POOL_TARGET by replacing a random existing slot once
+// the cap is hit. Returns true if the pool changed.
+function addToPool(row) {
+  if (!row) return false;
+  if (samples.some((s) => s.id === row.id)) return false;
+  const withU = withUrl(row);
+  if (samples.length >= POOL_TARGET) {
+    const idx = (Math.random() * samples.length) | 0;
+    samples = samples.map((s, i) => (i === idx ? withU : s));
+  } else {
+    samples = [withU, ...samples];
+  }
+  return true;
+}
+
+async function fetchSamplePool() {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // 1. fresh non-elders from the last 24h — cast a wide net, shuffle locally
+  const { data: fresh, error: fErr } = await supabase
+    .from('samples')
+    .select('*')
+    .gte('created_at', cutoff)
+    .lte('lifespan_ms', SAMPLE_LIFESPAN_MS)
+    .limit(256);
+  if (fErr) console.warn('[living] fresh pool fetch failed', fErr);
+
+  const pool = shuffle([...(fresh || [])]).slice(0, POOL_TARGET);
+
+  // 2. fill the deficit with random elders when fresh recordings are sparse
+  if (pool.length < POOL_TARGET) {
+    const deficit = POOL_TARGET - pool.length;
+    const { data: elders, error: eErr } = await supabase
+      .from('samples')
+      .select('*')
+      .gt('lifespan_ms', SAMPLE_LIFESPAN_MS)
+      .order('created_at', { ascending: false })
+      .limit(deficit * 3);
+    if (eErr) console.warn('[living] elder fill fetch failed', eErr);
+    const pickedElders = shuffle([...(elders || [])]).slice(0, deficit);
+    pool.push(...pickedElders);
+  }
+
+  return pool.map(withUrl);
+}
+
+export async function refreshSamplePool() {
+  try {
+    const next = await fetchSamplePool();
+    if (!next.length) return;  // don't wipe to empty on a transient failure
+    samples = next;
+    emit('sample', samples);
+  } catch (err) {
+    console.warn('[living] pool refresh failed', err);
+  }
+}
+
 // ——— bootstrap ———
 
 export async function connect() {
-  // 1. initial soul + samples
-  const [{ data: soul, error: se }, { data: sams, error: saErr }] = await Promise.all([
+  // 1. initial soul + sample pool, in parallel
+  const [{ data: soul, error: se }, pool] = await Promise.all([
     supabase.from('soul').select('state').eq('id', 1).single(),
-    supabase.from('samples').select('*').order('created_at', { ascending: false }).limit(64),
+    fetchSamplePool(),
   ]);
   if (se) console.warn('[living] soul fetch', se);
-  if (saErr) console.warn('[living] samples fetch', saErr);
 
   current = normalizeState(soul?.state);
-  samples = (sams || []).map(withUrl);
+  samples = pool;
   emit('change', current);
   emit('sample', samples);
 
@@ -72,8 +147,12 @@ export async function connect() {
     .on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'samples' },
       ({ new: row }) => {
-        samples = [withUrl(row), ...samples].slice(0, 64);
-        emit('sample', samples);
+        // the uploader already added their own sample locally in uploadSample();
+        // addToPool dedups by id, so that case is a no-op here. remote inserts
+        // only slide into the pool with REALTIME_KEEP_P probability so the
+        // rotation isn't dominated by whatever was just recorded.
+        if (Math.random() > REALTIME_KEEP_P) return;
+        if (addToPool(row)) emit('sample', samples);
       })
     .on('postgres_changes',
       { event: 'DELETE', schema: 'public', table: 'samples' },
@@ -196,8 +275,7 @@ export async function summonElderSample() {
     const unseen = data.filter((s) => !currentIds.has(s.id));
     if (!unseen.length) return null;
     const picked = unseen[Math.floor(Math.random() * unseen.length)];
-    samples = [withUrl(picked), ...samples];
-    emit('sample', samples);
+    if (addToPool(picked)) emit('sample', samples);
     return picked;
   } catch (err) {
     console.warn('[living] summon elder failed', err);
@@ -269,6 +347,10 @@ export async function uploadSample(blob, mime, duration) {
     console.error('[living] samples insert failed', error);
     throw new Error(`insert: ${error.message || 'unknown'}`);
   }
+  // ensure the uploader always hears their own voice regardless of the
+  // Realtime INSERT's 80% probability filter. addToPool dedups by id, so
+  // when the Realtime echo arrives it's a no-op.
+  if (addToPool(data)) emit('sample', samples);
   return { ...data, label };
 }
 

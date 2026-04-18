@@ -1,5 +1,4 @@
 import * as Tone from 'tone';
-import { sampleLife } from '../soul/evolve.js';
 
 // Caches decoded buffers. Plays random fragments of a recorded voice,
 // pitched to the current key, through the shared effect chain.
@@ -56,24 +55,18 @@ export class SampleBank {
     this.buffers.set(s.id, buf);
   }
 
-  // pick a sample weighted by life. newer/higher-life plays more often.
+  // uniform random pick from loaded samples. the pool itself is curated
+  // at fetch time (random 24h non-elders + elder fill), so we intentionally
+  // don't apply an age/life bias here — otherwise fresh samples would still
+  // dominate and defeat the fetch-side randomness.
   pickWeighted() {
     if (!this.samples.length) return null;
-    const loaded = this.samples.filter(s => {
+    const loaded = this.samples.filter((s) => {
       const b = this.buffers.get(s.id);
       return b && b.loaded;
     });
     if (!loaded.length) return null;
-    const now = Date.now();
-    const lifeOf = (s) => Math.max(0.05, s.life ?? sampleLife(s, now));
-    let total = 0;
-    for (const s of loaded) total += lifeOf(s);
-    let r = Math.random() * total;
-    for (const s of loaded) {
-      r -= lifeOf(s);
-      if (r <= 0) return s;
-    }
-    return loaded[0];
+    return loaded[(Math.random() * loaded.length) | 0];
   }
 
   /**

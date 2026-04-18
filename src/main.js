@@ -151,7 +151,8 @@ window.addEventListener('keydown', startAudio);
 recordBtn.addEventListener('touchstart', startAudio, { capture: true, passive: true });
 recordBtn.addEventListener('click', startAudio, { capture: true });
 
-// show phase in the status line
+// show phase in the status line + do quiet-period housekeeping
+let sleepCount = 0;
 state.on('phase', (phase) => {
   if (audioReady) {
     const word = {
@@ -163,11 +164,16 @@ state.on('phase', (phase) => {
     status.textContent = word;
     setTimeout(() => { if (status.textContent === word) status.textContent = hint.textContent; }, 3500);
   }
-  // on entering 'dreaming', reach into the cloud for an old elder fragment.
-  // surfacing it during the silence gives a lingering voice a chance to
-  // briefly tint the room mint, even if we hadn't loaded that one before.
-  if (phase === 'sleeping' && Math.random() < 0.75) {
-    state.summonElderSample().catch(() => {});
+  if (phase === 'sleeping') {
+    sleepCount++;
+    // on every sleep: ~75% chance to summon a cloud elder into the pool
+    if (Math.random() < 0.75) {
+      state.summonElderSample().catch(() => {});
+    }
+    // on every second sleep: rotate the whole pool during the quiet
+    if (sleepCount % 2 === 0) {
+      state.refreshSamplePool().catch(() => {});
+    }
   }
 });
 

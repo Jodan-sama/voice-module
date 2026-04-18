@@ -98,7 +98,7 @@ export function createInitialState(now = Date.now()) {
     phase: 'waking',
     phaseUntil: now + randi(10, 25) * 1000,
     breathSeconds: rand(6, 10),
-    sampleTriggerRate: rand(0.45, 0.92),
+    sampleTriggerRate: rand(0.36, 0.74),
     voiceTarget: randomVoiceTarget(),
     bornAt: now,
     version: 4,
@@ -258,7 +258,7 @@ function shiftArp(state) {
   if (chance(0.25)) state.arpSubdivision = pick([8, 8, 16, 16, 16]);
   if (chance(0.25)) state.restProb       = clamp((state.restProb ?? 0.2) + rand(-0.12, 0.12), 0.05, 0.45);
   if (chance(0.2))  state.tempoBpm       = clamp((state.tempoBpm ?? 96) + randi(-6, 6), 70, 128);
-  if (chance(0.3))  state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.7) + rand(-0.2, 0.2), 0.45, 0.98);
+  if (chance(0.3))  state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.55) + rand(-0.2, 0.2), 0.36, 0.78);
 }
 
 function shiftVoices(state) {

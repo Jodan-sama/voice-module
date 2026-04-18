@@ -68,10 +68,20 @@ export class SampleBank {
     const duration = buffer.duration;
     if (duration <= 0.05) return;
 
-    // pick a random fragment — vary length with some bias toward short
-    const minLen = 0.08;
-    const maxLen = Math.min(1.2, duration * 0.9);
-    const fragLen = minLen + Math.pow(Math.random(), 2) * (maxLen - minLen);
+    // ~15% of the time, play a longer chunk (1.5–4s capped to recording length)
+    // so big phrases occasionally come through; otherwise the usual short bias.
+    const goLong = Math.random() < 0.15 && duration >= 1.6;
+    let fragLen;
+    if (goLong) {
+      const longMax = Math.min(4.0, duration * 0.9);
+      fragLen = 1.5 + Math.random() * Math.max(0, longMax - 1.5);
+      // soften long fragments a touch so they sit under the arp instead of dominating
+      velocity *= 0.7;
+    } else {
+      const minLen = 0.08;
+      const maxLen = Math.min(1.2, duration * 0.9);
+      fragLen = minLen + Math.pow(Math.random(), 2) * (maxLen - minLen);
+    }
     const start = Math.random() * Math.max(0.0001, duration - fragLen - 0.01);
 
     const player = new Tone.Player({

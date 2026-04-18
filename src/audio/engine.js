@@ -262,7 +262,22 @@ export class Engine {
     const s = state.snapshot();
     if (!s) return;
     const now = performance.now();
-    const dt = this._lastBlendSync ? Math.min(0.5, (now - this._lastBlendSync) / 1000) : 0;
+    // first pass: snap voice gains to their target so the instrument is
+    // immediately audible instead of fading in from silence over ~5s.
+    if (!this._lastBlendSync) {
+      this._lastBlendSync = now;
+      const target = s.voiceTarget || {};
+      for (const name of VOICE_NAMES) {
+        const v = this.voices[name];
+        if (!v) continue;
+        const t = target[name] ?? 0;
+        v.target = t;
+        v.current = t;
+        v.gain.gain.value = t;
+      }
+      return;
+    }
+    const dt = Math.min(0.5, (now - this._lastBlendSync) / 1000);
     this._lastBlendSync = now;
     if (!dt) return;
 
@@ -345,7 +360,10 @@ export class Engine {
     // phase amplitude changes step-wise when the soul transitions phases.
     // smooth it asymmetrically — slow fade going quiet, quicker return when waking.
     const targetPhase = p.amp ?? 0.6;
-    if (this._smoothedAmp == null) this._smoothedAmp = targetPhase;
+    // initialize loud regardless of current phase, so a listener arriving during
+    // a 'sleeping' moment still gets immediate confirmation that audio is alive.
+    // the 20s downward smoothing then settles us into the actual phase level.
+    if (this._smoothedAmp == null) this._smoothedAmp = Math.max(0.7, targetPhase);
     const goingDown = targetPhase < this._smoothedAmp;
     const tau = goingDown ? 20 : 2.5;  // seconds
     if (dt) {

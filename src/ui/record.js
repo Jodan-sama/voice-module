@@ -50,14 +50,16 @@ export function initRecord({ button, status }) {
     } catch (err) {
       console.error('[record] failed', err);
       let msg;
-      if (err?.name === 'NotAllowedError')        msg = 'mic denied';
-      else if (err?.name === 'NotFoundError')     msg = 'no mic found';
-      else if (/upload/i.test(err?.message || '')) msg = 'upload rejected — see console';
-      else if (/insert/i.test(err?.message || '')) msg = 'save failed — see console';
-      else if (err?.message)                      msg = err.message.slice(0, 60).toLowerCase();
-      else                                         msg = 'couldn\'t record';
+      if (err?.name === 'NotAllowedError')       msg = 'mic denied';
+      else if (err?.name === 'NotFoundError')    msg = 'no mic found';
+      else if (err?.message) {
+        // strip our own "upload:" / "insert:" prefix so the user sees the raw Supabase text
+        msg = err.message.replace(/^(upload|insert):\s*/i, '').toLowerCase().slice(0, 140);
+      } else {
+        msg = 'couldn\'t record';
+      }
       status.textContent = msg;
-      setTimeout(() => { status.textContent = originalHint; }, 4000);
+      setTimeout(() => { status.textContent = originalHint; }, 9000);
     } finally {
       button.classList.remove('active');
       busy = false;

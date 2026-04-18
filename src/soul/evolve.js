@@ -21,6 +21,23 @@ const SCALE_NAMES = Object.keys(SCALES);
 export const ARP_PATTERNS = ['up', 'down', 'updown', 'random', 'converge', 'alt'];
 const EFFECT_NAMES = ['reverb', 'delay', 'chorus', 'filter', 'bitcrush', 'pingpong', 'tremolo'];
 
+// pleasing progressions in scale degrees — work across minor/dorian/etc.
+// (roots are 0-indexed scale degrees: 0=i, 1=ii, 2=iii, …)
+const PROGRESSIONS = [
+  [0, 5, 3, 4],       // i  –  vi – iv – v     (lofi classic)
+  [0, 3, 4, 0],       // i  –  iv – v  – i
+  [0, 5, 6, 4],       // i  –  vi – vii – v
+  [0, 6, 3, 4],       // i  –  vii – iv – v
+  [0, 4, 5, 3],       // i  –  v  – vi – iv    (andalusian-ish)
+  [0, 2, 5, 4],       // i  –  iii – vi – v
+  [0, 5, 3, 6],       // i  –  vi – iv – vii
+  [0, 2, 3, 4],       // stepwise climb
+  [0, 0, 3, 4],       // tonic pedal then cadence
+  [0, 3, 0, 4],       // i-iv-i-v
+];
+
+export const VOICE_NAMES = ['triangle', 'sine', 'square', 'pluck', 'bell', 'soft'];
+
 const rand  = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 const pick  = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -31,20 +48,25 @@ export function createInitialState(now = Date.now()) {
   return {
     key: pick(KEYS),
     scale: pick(SCALE_NAMES),
-    tempoBpm: Math.round(rand(56, 92)),
+    tempoBpm: Math.round(rand(84, 118)),      // quicker default feel
     rootOctave: 3,
     arpPattern: pick(ARP_PATTERNS),
     arpSteps: randi(6, 12),
-    arpGate: rand(0.35, 0.85),
-    arpSubdivision: pick([4, 8, 8, 8, 16]),
+    arpGate: rand(0.35, 0.75),
+    arpSubdivision: pick([8, 8, 16, 16, 16]), // faster bias
+    restProb: rand(0.12, 0.28),               // space to breathe
+    progression: pick(PROGRESSIONS).slice(),
+    beatsPerChord: pick([4, 4, 8, 8, 16]),
+    progressionAnchorAt: now,
     effects: spawnEffects(),
     backgroundRhythm: spawnRhythm(),
     phase: 'waking',
     phaseUntil: now + randi(10, 25) * 1000,
     breathSeconds: rand(6, 10),
     sampleTriggerRate: rand(0.15, 0.45),
+    voiceTarget: randomVoiceTarget(),
     bornAt: now,
-    version: 1,
+    version: 2,
   };
 }
 
@@ -86,15 +108,32 @@ function spawnRhythm() {
   };
 }
 
+function randomVoiceTarget() {
+  // 2-3 voices active with weights, others 0. creates a timbral identity
+  // that evolves but never lets too many voices compete at once.
+  const n = randi(2, 3);
+  const pool = [...VOICE_NAMES];
+  const blend = Object.fromEntries(VOICE_NAMES.map(v => [v, 0]));
+  for (let i = 0; i < n && pool.length; i++) {
+    const idx = (Math.random() * pool.length) | 0;
+    const v = pool.splice(idx, 1)[0];
+    blend[v] = rand(0.45, 1.0);
+  }
+  return blend;
+}
+
 // ——— evolution step. Returns true if `state` was mutated. ———
 export function tickEvolution(state, now = Date.now()) {
-  if (!state || !state.version) {
+  if (!state || state.version !== 2) {
+    // either brand new or older schema — regenerate, but keep bornAt if present
+    const bornAt = state?.bornAt || now;
     Object.assign(state, createInitialState(now));
+    state.bornAt = bornAt;
     return true;
   }
   let changed = false;
 
-  // catch-up: advance phase as many times as needed if there was a long gap
+  // catch-up phase transitions if there was a long gap
   let guard = 32;
   while (now >= (state.phaseUntil ?? 0) && guard-- > 0) {
     transitionPhase(state, now);
@@ -102,9 +141,12 @@ export function tickEvolution(state, now = Date.now()) {
   }
 
   const awake = state.phase === 'awake' || state.phase === 'waking';
-  if (awake && chance(0.012)) { shiftEffect(state); changed = true; }
-  if (awake && chance(0.008)) { shiftArp(state);    changed = true; }
-  if (awake && chance(0.004)) { shiftKey(state);    changed = true; }
+
+  if (awake && chance(0.025)) { shiftEffect(state); changed = true; }
+  if (awake && chance(0.010)) { shiftArp(state);    changed = true; }
+  if (awake && chance(0.006)) { shiftVoices(state); changed = true; }
+  if (awake && chance(0.004)) { shiftProgression(state, now); changed = true; }
+  if (awake && chance(0.003)) { shiftKey(state);    changed = true; }
   if (chance(0.003))          { state.backgroundRhythm = spawnRhythm(); changed = true; }
 
   return changed;
@@ -145,11 +187,11 @@ function shiftEffect(state) {
     }
   } else {
     const e = pick(fx);
-    if ('wet' in e)      e.wet      = clamp(e.wet      + rand(-0.15, 0.15), 0, 1);
-    if ('cutoff' in e)   e.cutoff   = clamp(e.cutoff   * rand(0.6, 1.6),    120, 8000);
-    if ('feedback' in e) e.feedback = clamp(e.feedback + rand(-0.15, 0.15), 0, 0.85);
-    if ('depth' in e)    e.depth    = clamp(e.depth    + rand(-0.2, 0.2),   0, 1);
-    if ('freq' in e)     e.freq     = Math.max(0.05, e.freq * rand(0.6, 1.6));
+    if ('wet' in e)      e.wet      = clamp(e.wet      + rand(-0.2, 0.2),  0, 1);
+    if ('cutoff' in e)   e.cutoff   = clamp(e.cutoff   * rand(0.5, 1.8),   120, 8000);
+    if ('feedback' in e) e.feedback = clamp(e.feedback + rand(-0.15, 0.15),0, 0.85);
+    if ('depth' in e)    e.depth    = clamp(e.depth    + rand(-0.25, 0.25),0, 1);
+    if ('freq' in e)     e.freq     = Math.max(0.05, e.freq * rand(0.5, 1.8));
   }
 }
 
@@ -157,9 +199,37 @@ function shiftArp(state) {
   if (chance(0.5)) state.arpPattern     = pick(ARP_PATTERNS);
   if (chance(0.5)) state.arpSteps       = clamp((state.arpSteps ?? 8) + randi(-2, 2), 4, 16);
   if (chance(0.4)) state.arpGate        = clamp((state.arpGate ?? 0.5) + rand(-0.2, 0.2), 0.15, 1.1);
-  if (chance(0.3)) state.arpSubdivision = pick([4, 8, 8, 8, 16]);
-  if (chance(0.2)) state.tempoBpm       = clamp((state.tempoBpm ?? 72) + randi(-6, 6), 48, 110);
+  if (chance(0.3)) state.arpSubdivision = pick([8, 8, 16, 16, 16]);
+  if (chance(0.25)) state.restProb      = clamp((state.restProb ?? 0.2) + rand(-0.12, 0.12), 0.05, 0.5);
+  if (chance(0.2)) state.tempoBpm       = clamp((state.tempoBpm ?? 96) + randi(-6, 6), 70, 128);
   if (chance(0.3)) state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.25) + rand(-0.1, 0.1), 0.05, 0.8);
+}
+
+function shiftVoices(state) {
+  // subtly shift the blend target — engine crossfades actual gains toward it
+  if (chance(0.5)) {
+    state.voiceTarget = randomVoiceTarget();
+  } else {
+    // nudge current target instead of replacing it
+    const t = { ...(state.voiceTarget || {}) };
+    for (const v of VOICE_NAMES) {
+      const cur = t[v] ?? 0;
+      if (chance(0.35)) {
+        const next = clamp(cur + rand(-0.35, 0.35), 0, 1);
+        t[v] = next < 0.08 ? 0 : next;
+      }
+    }
+    // guarantee at least one voice is audible
+    const anyOn = VOICE_NAMES.some(v => (t[v] ?? 0) > 0.2);
+    if (!anyOn) t[pick(VOICE_NAMES)] = rand(0.5, 1.0);
+    state.voiceTarget = t;
+  }
+}
+
+function shiftProgression(state, now) {
+  if (chance(0.65)) state.progression = pick(PROGRESSIONS).slice();
+  if (chance(0.3))  state.beatsPerChord = pick([4, 4, 8, 8, 16]);
+  state.progressionAnchorAt = now;
 }
 
 function shiftKey(state) {
@@ -183,6 +253,35 @@ export function computePulse(state, now = Date.now()) {
     amp: ampByPhase[state.phase] ?? 0.6,
     phase: state.phase ?? 'sleeping',
   };
+}
+
+// ——— helpers used by the engine ———
+
+// the currently-voiced chord's scale-degree root, from wall-clock
+export function currentChordRoot(state, now = Date.now()) {
+  const prog = state.progression || [0];
+  if (prog.length <= 1) return prog[0] ?? 0;
+  const anchor = state.progressionAnchorAt || state.bornAt || now;
+  const beatsPerChord = state.beatsPerChord || 8;
+  const chordMs = beatsPerChord * (60_000 / (state.tempoBpm || 96));
+  const idx = Math.floor(((now - anchor) / chordMs)) % prog.length;
+  return prog[((idx % prog.length) + prog.length) % prog.length] ?? 0;
+}
+
+// chord-tone aware MIDI note for a given arp step + chord root
+// uses a 7th chord voicing [root, 3rd, 5th, 7th] cycled across octaves.
+export function chordNoteMidi(state, chordRootDeg, step) {
+  const scale = SCALES[state.scale] || SCALES.minor;
+  const chordPositions = [0, 2, 4, 6];
+  const nPos = chordPositions.length;
+  const octInArp = Math.floor(step / nPos);
+  const posIdx = ((step % nPos) + nPos) % nPos;
+  const scaleStep = chordRootDeg + chordPositions[posIdx];
+  const scaleDeg = ((scaleStep % scale.length) + scale.length) % scale.length;
+  const octFromWrap = Math.floor(scaleStep / scale.length);
+  const keyIdx = Math.max(0, KEYS.indexOf(state.key));
+  const rootMidi = 12 * ((state.rootOctave || 3) + 1) + keyIdx;
+  return rootMidi + scale[scaleDeg] + 12 * (octInArp + octFromWrap);
 }
 
 // ——— sample life: derived from created_at, so we never persist it ———

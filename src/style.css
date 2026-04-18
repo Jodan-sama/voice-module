@@ -93,6 +93,10 @@ html, body {
   text-transform: lowercase;
   z-index: 3;
   pointer-events: none;
+  max-width: min(86vw, 720px);
+  text-align: center;
+  white-space: normal;
+  line-height: 1.5;
 }
 
 @media (prefers-reduced-motion: reduce) {

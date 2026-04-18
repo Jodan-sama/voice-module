@@ -2,6 +2,14 @@ import * as THREE from 'three';
 import { createFerrofluid } from './ferrofluid.js';
 import * as state from '../state.js';
 
+const ELDER_THRESHOLD_MS = 3 * 60 * 60 * 1000;  // 3 hours — anything older tints the room mint
+
+function hasElderSamples(samples) {
+  if (!samples?.length) return false;
+  const now = Date.now();
+  return samples.some((s) => now - new Date(s.created_at).getTime() > ELDER_THRESHOLD_MS);
+}
+
 // Minimal 3D stage:
 // - rectangular semi-transparent shell
 // - ferrofluid blob at center
@@ -84,6 +92,14 @@ export function initScene(canvas) {
   lights[2].position.set(0.55, -0.2, -0.15);
   for (const l of lights) scene.add(l);
 
+  // base tints for each light; we lerp toward mint when elder samples are alive
+  const COLOR_BASE = [
+    new THREE.Color(0xffffff),
+    new THREE.Color(0xffffff),
+    new THREE.Color(0xfff6e6),
+  ];
+  const MINT = new THREE.Color(0xc8f2dc);  // soft mint, restrained
+
   // a gentle ambient so the outside has definition
   scene.add(new THREE.AmbientLight(0x223044, 0.35));
   // rim light from camera side to draw edges of the shell
@@ -104,8 +120,15 @@ export function initScene(canvas) {
   // ——— live signals ———
   let pulse = { breath: 0.5, amp: 0.6, phase: 'awake' };
   let sampleFlash = 0; // brief spike on new sample
+  let mintTarget = hasElderSamples(state.currentSamples()) ? 1 : 0;
+  let mintAmount = mintTarget;  // start at target so we don't fade in on refresh
+  // re-check elder status on a slow timer since samples cross the 3h line silently
+  setInterval(() => { mintTarget = hasElderSamples(state.currentSamples()) ? 1 : 0; }, 30_000);
   state.on('pulse', (p) => { pulse = p; });
-  state.on('sample', () => { sampleFlash = 1.0; });
+  state.on('sample', (samples) => {
+    sampleFlash = 1.0;
+    mintTarget = hasElderSamples(samples) ? 1 : 0;
+  });
 
   const clock = new THREE.Clock();
   let t0 = 0;
@@ -139,6 +162,15 @@ export function initScene(canvas) {
     lights[0].intensity = lightBase + breath * 1.6;
     lights[1].intensity = lightBase * 0.7 + breath * 1.0;
     lights[2].intensity = lightBase * 0.85 + (1 - breath) * 0.8;
+
+    // gradually lerp mintAmount toward mintTarget (~8s time constant)
+    mintAmount += (mintTarget - mintAmount) * (1 - Math.exp(-dt / 8));
+    // apply a gentle mint blend to each light. center light gets slightly less
+    // so the ferrofluid's silhouette stays readable.
+    const tint = mintAmount * 0.35;
+    lights[0].color.copy(COLOR_BASE[0]).lerp(MINT, tint * 0.65);
+    lights[1].color.copy(COLOR_BASE[1]).lerp(MINT, tint);
+    lights[2].color.copy(COLOR_BASE[2]).lerp(MINT, tint * 0.85);
 
     // camera drifts in a slow lissajous — never repeats
     const d = 3.3 + 0.12 * Math.sin(t0 * 0.13);

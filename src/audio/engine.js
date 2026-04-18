@@ -81,6 +81,9 @@ export class Engine {
     this.master = null;
     this.breathGain = null;
     this.effects = null;
+    this.tailBus = null;
+    this.tailReverb = null;
+    this.tailGain = null;
     this.voices = {};        // name -> { synth, gain, target, current }
     this.padSynth = null;
     this.rhythmSynth = null;
@@ -91,16 +94,33 @@ export class Engine {
     this.arpLoop = null;
     this.rhythmLoop = null;
     this._lastBlendSync = 0;
+    this._lastEffectsSig = null;
+    this._lastArpSig = null;
+    this._lastArpSub = null;
   }
 
   async start() {
     if (this.started) return;
     await Tone.start();
+    // give the scheduler more buffer so main-thread bumps don't glitch audio
+    try { Tone.context.lookAhead = 0.2; } catch {}
     this.started = true;
 
     this.master = new Tone.Gain(0.85).toDestination();
     this.breathGain = new Tone.Gain(1).connect(this.master);
     this.effects = new EffectChain(this.breathGain);
+
+    // Persistent tail reverb. Taps post-effects but bypasses the breath
+    // envelope, so the room keeps ringing through phase transitions and
+    // mid-frame dropouts. Carries ~7s of decay.
+    this.tailBus = new Tone.Gain(0.32);
+    this.tailReverb = new Tone.Reverb({ decay: 7, preDelay: 0.05, wet: 1.0 });
+    this.tailGain = new Tone.Gain(0.55).connect(this.master);
+    this.tailBus.connect(this.tailReverb);
+    this.tailReverb.connect(this.tailGain);
+    await this.tailReverb.generate().catch(() => {});
+    // send from post-effects into the tail — arrives already coloured
+    this.effects.output.connect(this.tailBus);
 
     // voices — each fed into the shared effect chain through its own gain
     for (const name of VOICE_NAMES) {
@@ -280,25 +300,59 @@ export class Engine {
 
   applyState(patch, initial) {
     const now = state.snapshot() || {};
+
+    // tempo — ramp, don't reset
     if (patch.tempoBpm && now.tempoBpm) {
       Tone.Transport.bpm.rampTo(now.tempoBpm, 3);
     } else if (initial) {
       Tone.Transport.bpm.value = now.tempoBpm ?? 96;
     }
-    if (initial || patch.arpPattern || patch.arpSteps) {
+
+    // arp pattern rebuild only when pattern or step count actually differs.
+    // realtime patches contain every field, so a naive check causes
+    // rebuilds on every tempo/effect/voice drift — that's the click source.
+    const arpSig = `${now.arpPattern}:${now.arpSteps}`;
+    if (arpSig !== this._lastArpSig) {
       this.arpOrder = expandArp(now.arpPattern, now.arpSteps);
       this.arpIdx = 0;
+      this._lastArpSig = arpSig;
     }
-    if (patch.arpSubdivision) this._scheduleArp(now.arpSubdivision);
-    if (initial || patch.effects) this.effects.setEffects(now.effects || []);
+
+    if (now.arpSubdivision && now.arpSubdivision !== this._lastArpSub) {
+      this._scheduleArp(now.arpSubdivision);
+      this._lastArpSub = now.arpSubdivision;
+    }
+
+    // effect chain rebuild only when the effect set structurally changes.
+    // stringify is cheap for a list of ~3 small objects.
+    const fxSig = JSON.stringify(now.effects || []);
+    if (fxSig !== this._lastEffectsSig) {
+      this.effects.setEffects(now.effects || []);
+      this._lastEffectsSig = fxSig;
+    }
     // voice target is applied continuously by _driftVoiceBlend — nothing to do here
   }
 
   _applyPulse(p) {
-    const phaseAmp = p.amp ?? 0.6;
-    const breathMod = 0.7 + 0.3 * (p.breath ?? 0.5);
-    const target = Math.max(0.05, Math.min(1.0, phaseAmp * breathMod));
     if (!this.breathGain) return;
+
+    const now = performance.now();
+    const dt = this._lastAmpT ? Math.min(0.5, (now - this._lastAmpT) / 1000) : 0;
+    this._lastAmpT = now;
+
+    // phase amplitude changes step-wise when the soul transitions phases.
+    // smooth it asymmetrically — slow fade going quiet, quicker return when waking.
+    const targetPhase = p.amp ?? 0.6;
+    if (this._smoothedAmp == null) this._smoothedAmp = targetPhase;
+    const goingDown = targetPhase < this._smoothedAmp;
+    const tau = goingDown ? 20 : 2.5;  // seconds
+    if (dt) {
+      const alpha = 1 - Math.exp(-dt / tau);
+      this._smoothedAmp += (targetPhase - this._smoothedAmp) * alpha;
+    }
+
+    const breathMod = 0.7 + 0.3 * (p.breath ?? 0.5);
+    const target = Math.max(0.02, Math.min(1.0, this._smoothedAmp * breathMod));
     this.breathGain.gain.rampTo(target, 0.12);
   }
 }

@@ -31,18 +31,17 @@ npm start   # serves dist/ and the API on :3000
 
 State and samples live in `server/data/` (override with `DATA_DIR=…`). Delete it to start fresh.
 
-## Deploy to Fly.io
+## Deploy to Fly.io (via GitHub Actions)
 
-The soul is a long-running, stateful process that must keep evolving whether anyone's watching or not, so this is a single always-on Machine with a persistent volume.
+The soul is a long-running, stateful process that must keep evolving whether anyone's watching or not, so this is a single always-on Machine with a persistent volume. GitHub Actions handles everything — you never need a local CLI.
 
-```bash
-# one-time setup
-fly apps create app-red-water-2820                      # or a name you like
-fly volumes create living_data --region iad --size 1    # matches fly.toml
+One-time setup (all in a browser):
 
-# deploy
-fly deploy
-```
+1. **Get a Fly token** — https://fly.io/user/personal_access_tokens → *Create access token* → copy it.
+2. **Add it as a repo secret** — GitHub repo → *Settings → Secrets and variables → Actions → New repository secret*. Name: `FLY_API_TOKEN`. Value: the token from step 1.
+3. **Run the workflow** — GitHub repo → *Actions* → *deploy* → *Run workflow*. It auto-runs on every push to `main` too.
+
+The workflow (`.github/workflows/deploy.yml`) creates the Fly app and the `living_data` volume on the first run if they don't exist, then `fly deploy`s. Subsequent pushes just redeploy.
 
 Config highlights in `fly.toml`:
 - `auto_stop_machines = "off"` and `min_machines_running = 1` — the instrument never sleeps server-side

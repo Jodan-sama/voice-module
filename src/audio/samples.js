@@ -124,13 +124,19 @@ export class SampleBank {
       fadeIn,
       fadeOut,
     });
+    // mono MediaRecorder output can collapse to one channel through some stereo
+    // effects (pingpong / phaser / pitchshift). route each sample through a
+    // Panner with only a tiny random offset so it's forced into the stereo
+    // field and stays essentially centered.
+    const pan = new Tone.Panner(-0.15 + Math.random() * 0.3);
     // +5 dB makeup so voices sit on top of the bed instead of behind it
     const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity)) + 5).connect(dest);
-    player.connect(vol);
+    player.connect(pan);
+    pan.connect(vol);
     const t = when ?? Tone.now();
     try {
       player.start(t, start, fragLen);
     } catch (e) { /* race — buffer swapped out */ }
-    player.onstop = () => { try { player.dispose(); vol.dispose(); } catch {} };
+    player.onstop = () => { try { player.dispose(); pan.dispose(); vol.dispose(); } catch {} };
   }
 }

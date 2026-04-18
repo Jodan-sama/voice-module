@@ -29,7 +29,28 @@ npm run build
 npm start   # serves dist/ and the API on :3000
 ```
 
-State and samples live in `server/data/`. Delete it to start fresh.
+State and samples live in `server/data/` (override with `DATA_DIR=…`). Delete it to start fresh.
+
+## Deploy to Fly.io
+
+The soul is a long-running, stateful process that must keep evolving whether anyone's watching or not, so this is a single always-on Machine with a persistent volume.
+
+```bash
+# one-time setup
+fly apps create app-red-water-2820                      # or a name you like
+fly volumes create living_data --region iad --size 1    # matches fly.toml
+
+# deploy
+fly deploy
+```
+
+Config highlights in `fly.toml`:
+- `auto_stop_machines = "off"` and `min_machines_running = 1` — the instrument never sleeps server-side
+- `[[mounts]]` attaches `living_data` at `/data`; the server writes `state.json` and `samples/*` there via `DATA_DIR=/data`
+- health check hits `/api/state`
+- WebSocket on `/ws` works through Fly's proxy with no extra config
+
+If you picked a different app name, update `app = "…"` at the top of `fly.toml`. If you picked a different region, change `primary_region` **and** the `--region` flag when creating the volume.
 
 ## Layout
 

@@ -9,11 +9,14 @@ import { Soul } from './soul.js';
 import { Storage } from './storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, 'data');
+// DATA_DIR is where the soul's state and voice fragments live.
+// In production (Fly) we mount a persistent volume at /data and point here.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SAMPLE_DIR = path.join(DATA_DIR, 'samples');
 fs.mkdirSync(SAMPLE_DIR, { recursive: true });
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 
 const storage = new Storage({ dataDir: DATA_DIR, sampleDir: SAMPLE_DIR });
@@ -84,8 +87,8 @@ setInterval(() => {
 
 soul.start();
 
-server.listen(PORT, () => {
-  console.log(`[living] listening on :${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[living] listening on ${HOST}:${PORT}  (data: ${DATA_DIR})`);
 });
 
 function shutdown() {

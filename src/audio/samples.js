@@ -1,4 +1,5 @@
 import * as Tone from 'tone';
+import { sampleLife } from '../soul/evolve.js';
 
 // Caches decoded buffers. Plays random fragments of a recorded voice,
 // pitched to the current key, through the shared effect chain.
@@ -41,11 +42,13 @@ export class SampleBank {
       return b && b.loaded;
     });
     if (!loaded.length) return null;
+    const now = Date.now();
+    const lifeOf = (s) => Math.max(0.05, s.life ?? sampleLife(s, now));
     let total = 0;
-    for (const s of loaded) total += Math.max(0.05, s.life ?? 1);
+    for (const s of loaded) total += lifeOf(s);
     let r = Math.random() * total;
     for (const s of loaded) {
-      r -= Math.max(0.05, s.life ?? 1);
+      r -= lifeOf(s);
       if (r <= 0) return s;
     }
     return loaded[0];

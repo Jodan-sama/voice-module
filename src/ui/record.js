@@ -2,8 +2,9 @@ import * as state from '../state.js';
 
 const DURATION_SEC = 5;
 
-// Records ~5 seconds of voice, uploads raw blob to server.
-// Server stores; soul broadcasts the new sample id; clients load and play.
+// Records ~5 seconds of voice, uploads the blob to Supabase Storage,
+// then inserts a row into `samples`. All other clients receive it over
+// Realtime and start weaving it in.
 export function initRecord({ button, status }) {
   let busy = false;
 
@@ -25,7 +26,6 @@ export function initRecord({ button, status }) {
       const started = performance.now();
       rec.start();
 
-      // countdown
       let remaining = DURATION_SEC;
       status.textContent = `listening · ${remaining}`;
       const interval = setInterval(() => {

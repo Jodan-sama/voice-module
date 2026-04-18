@@ -113,6 +113,7 @@ export class Engine {
     // apply current soul state
     const snap = state.snapshot();
     if (snap) this.applyState(snap, true);
+    this.samples.update(state.currentSamples());
     state.on('change', (patch) => this.applyState(patch, false));
     state.on('sample', (samples) => this.samples.update(samples));
     state.on('pulse', (p) => this._applyPulse(p));
@@ -192,7 +193,7 @@ export class Engine {
     } catch {}
 
     // maybe trigger a voice fragment, pitched to the current arp note
-    if (s.samples?.length) {
+    if (this.samples.samples.length) {
       const rate = (s.sampleTriggerRate ?? 0.25) * phaseAmp;
       if (Math.random() < rate) {
         // pitch: align sample's reference (~C4) to current step
@@ -236,8 +237,6 @@ export class Engine {
     if (patch.arpSubdivision) this._scheduleArp(now.arpSubdivision);
     // effects
     if (initial || patch.effects) this.effects.setEffects(now.effects || []);
-    // samples
-    if (initial || patch.samples) this.samples.update(now.samples || []);
     // rhythm pattern changes — nothing to do, tick reads live state
   }
 

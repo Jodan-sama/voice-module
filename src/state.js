@@ -1,72 +1,240 @@
-// Connects to the server, keeps a local mirror of the soul,
-// and exposes `on('change'|'pulse'|'sample', cb)` for subscribers.
+// State mirror + Supabase wiring.
+//
+// Design:
+// - One `soul` row in Postgres, live-mirrored here via Realtime.
+// - A `samples` table, also live-mirrored.
+// - Breath/amplitude pulse is computed locally every RAF — no network.
+// - Clients join a Realtime presence channel keyed by a random sessionId.
+//   The member with the lexicographically smallest id is the "leader" and
+//   is the only one running evolution + writing state. If they leave,
+//   presence sync elects another within ~2s. When the site is empty,
+//   the instrument sleeps. When someone returns, evolution catches up.
 
-const listeners = { change: new Set(), pulse: new Set(), sample: new Set(), phase: new Set() };
+import { supabase, publicUrl } from './supa.js';
+import { tickEvolution, computePulse, createInitialState, sampleLife, SAMPLE_LIFESPAN_MS } from './soul/evolve.js';
+
+const PRESENCE_CHANNEL = 'living:presence';
+const SOUL_CHANNEL     = 'living:soul';
+const TICK_MS          = 500;
+const PERSIST_MIN_MS   = 1200;   // soonest we'll write to DB after a change
+const PERSIST_MAX_MS   = 15000;  // latest we'll sit on a change
+const CULL_INTERVAL_MS = 60_000; // how often the leader prunes dead samples
+
+const sessionId = crypto.randomUUID();
+
+const listeners = { change: new Set(), pulse: new Set(), phase: new Set(), sample: new Set() };
+function emit(ev, v) { for (const cb of listeners[ev] || []) { try { cb(v); } catch (e) { console.error(e); } } }
+export function on(ev, cb) { listeners[ev]?.add(cb); return () => listeners[ev]?.delete(cb); }
+
 let current = null;
-let ws = null;
-let reconnectDelay = 500;
-
-export function on(ev, cb) {
-  listeners[ev]?.add(cb);
-  return () => listeners[ev]?.delete(cb);
-}
-function emit(ev, payload) {
-  for (const cb of listeners[ev] || []) { try { cb(payload); } catch (e) { console.error(e); } }
-}
-
+let samples = [];
 export function snapshot() { return current; }
+export function currentSamples() { return samples; }
+
+let isLeader = false;
+let leaderCheck = null;
+let pendingWrite = null;
+let lastPersistAt = 0;
+let dirtySince = 0;
+
+// ——— bootstrap ———
 
 export async function connect() {
-  // bootstrap over HTTP so we have state before WS handshakes
-  try {
-    const r = await fetch('/api/state');
-    if (r.ok) {
-      current = await r.json();
-      emit('change', current);
+  // 1. initial soul + samples
+  const [{ data: soul, error: se }, { data: sams, error: saErr }] = await Promise.all([
+    supabase.from('soul').select('state').eq('id', 1).single(),
+    supabase.from('samples').select('*').order('created_at', { ascending: false }).limit(64),
+  ]);
+  if (se) console.warn('[living] soul fetch', se);
+  if (saErr) console.warn('[living] samples fetch', saErr);
+
+  current = normalizeState(soul?.state);
+  samples = (sams || []).map(withUrl);
+  emit('change', current);
+  emit('sample', samples);
+
+  // 2. subscribe to realtime changes
+  supabase
+    .channel(SOUL_CHANNEL)
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'soul', filter: 'id=eq.1' },
+      (payload) => {
+        const next = normalizeState(payload.new?.state);
+        const prevPhase = current?.phase;
+        current = next;
+        emit('change', next);
+        if (next.phase !== prevPhase) emit('phase', next.phase);
+      })
+    .subscribe();
+
+  supabase
+    .channel('living:samples')
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'samples' },
+      ({ new: row }) => {
+        samples = [withUrl(row), ...samples].slice(0, 64);
+        emit('sample', samples);
+      })
+    .on('postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'samples' },
+      ({ old }) => {
+        samples = samples.filter(s => s.id !== old.id);
+        emit('sample', samples);
+      })
+    .subscribe();
+
+  // 3. presence — elect a leader
+  const presence = supabase.channel(PRESENCE_CHANNEL, { config: { presence: { key: sessionId } } });
+  presence
+    .on('presence', { event: 'sync' }, () => {
+      const state = presence.presenceState();
+      const ids = Object.keys(state).sort();
+      const shouldLead = ids[0] === sessionId;
+      if (shouldLead !== isLeader) {
+        isLeader = shouldLead;
+        if (isLeader) startLeading();
+        else stopLeading();
+      }
+    })
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await presence.track({ joinedAt: Date.now() });
+      }
+    });
+
+  // 4. local pulse loop — every RAF is too often for subscribers, throttle to ~60ms
+  let lastPulseT = 0;
+  const pulseLoop = () => {
+    const now = performance.now();
+    if (now - lastPulseT > 60) {
+      lastPulseT = now;
+      emit('pulse', computePulse(current, Date.now()));
     }
-  } catch (e) { /* fine, WS will hello */ }
-  openSocket();
+    requestAnimationFrame(pulseLoop);
+  };
+  requestAnimationFrame(pulseLoop);
 }
 
-function openSocket() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.addEventListener('open', () => { reconnectDelay = 500; });
-  ws.addEventListener('message', (ev) => {
-    let msg;
-    try { msg = JSON.parse(ev.data); } catch { return; }
-    handle(msg);
-  });
-  ws.addEventListener('close', () => {
-    setTimeout(openSocket, Math.min(reconnectDelay *= 1.6, 8000));
-  });
-  ws.addEventListener('error', () => { try { ws.close(); } catch {} });
+// ——— leader behavior ———
+
+function startLeading() {
+  // initialize the state if nobody has yet
+  if (!current || !current.version) {
+    current = createInitialState(Date.now());
+    markDirty();
+  }
+  leaderCheck = setInterval(leaderTick, TICK_MS);
+  // prune dead samples periodically
+  leaderCull();
+  cullTimer = setInterval(leaderCull, CULL_INTERVAL_MS);
 }
 
-function handle(msg) {
-  if (msg.type === 'hello') {
-    const prevPhase = current?.phase;
-    current = msg.state;
+function stopLeading() {
+  if (leaderCheck) clearInterval(leaderCheck);
+  if (cullTimer)   clearInterval(cullTimer);
+  leaderCheck = null;
+  cullTimer = null;
+  if (pendingWrite) { clearTimeout(pendingWrite); pendingWrite = null; }
+}
+
+let cullTimer = null;
+
+function leaderTick() {
+  if (!isLeader || !current) return;
+  const now = Date.now();
+  const changed = tickEvolution(current, now);
+  if (changed) {
     emit('change', current);
-    if (current.phase !== prevPhase) emit('phase', current.phase);
-  } else if (msg.type === 'patch') {
-    if (!current) return;
-    const prevPhase = current.phase;
-    current = { ...current, ...msg.patch };
-    emit('change', msg.patch);
-    if (msg.patch.samples) emit('sample', current.samples);
-    if (msg.patch.phase && msg.patch.phase !== prevPhase) emit('phase', msg.patch.phase);
-  } else if (msg.type === 'pulse') {
-    emit('pulse', msg.pulse);
+    markDirty();
+    maybePersist();
   }
 }
 
-export async function uploadSample(blob, mime, duration) {
-  const res = await fetch('/api/sample', {
-    method: 'POST',
-    headers: { 'Content-Type': mime, 'X-Duration': String(duration) },
-    body: blob,
-  });
-  if (!res.ok) throw new Error(`upload failed: ${res.status}`);
-  return res.json();
+function markDirty() { if (!dirtySince) dirtySince = Date.now(); }
+
+function maybePersist() {
+  if (!dirtySince) return;
+  const now = Date.now();
+  const sinceDirty = now - dirtySince;
+  const sinceLast  = now - lastPersistAt;
+  // persist immediately if stale, else debounce
+  if (sinceDirty >= PERSIST_MAX_MS || sinceLast >= PERSIST_MAX_MS) {
+    persistNow();
+    return;
+  }
+  if (pendingWrite) return;
+  const wait = Math.max(PERSIST_MIN_MS - sinceLast, 200);
+  pendingWrite = setTimeout(() => { pendingWrite = null; persistNow(); }, wait);
 }
+
+async function persistNow() {
+  if (!isLeader || !current) return;
+  dirtySince = 0;
+  lastPersistAt = Date.now();
+  const toWrite = { state: current, leader_id: sessionId, leader_seen: new Date().toISOString() };
+  const { error } = await supabase.from('soul').update(toWrite).eq('id', 1);
+  if (error) console.warn('[living] soul persist failed', error);
+}
+
+async function leaderCull() {
+  if (!isLeader) return;
+  const cutoff = new Date(Date.now() - SAMPLE_LIFESPAN_MS).toISOString();
+  const { data: dead, error } = await supabase
+    .from('samples')
+    .select('id, path')
+    .lt('created_at', cutoff);
+  if (error) return console.warn('[living] cull query failed', error);
+  if (!dead?.length) return;
+  const ids = dead.map(d => d.id);
+  const paths = dead.map(d => d.path).filter(Boolean);
+  await supabase.from('samples').delete().in('id', ids);
+  if (paths.length) await supabase.storage.from('fragments').remove(paths);
+}
+
+// ——— uploads ———
+
+export async function uploadSample(blob, mime, duration) {
+  const id = crypto.randomUUID();
+  const ext = extFor(mime);
+  const path = `${id}.${ext}`;
+  const { error: upErr } = await supabase.storage.from('fragments').upload(path, blob, {
+    contentType: mime,
+    cacheControl: '31536000',
+    upsert: false,
+  });
+  if (upErr) throw new Error(`upload: ${upErr.message}`);
+  const { data, error } = await supabase
+    .from('samples')
+    .insert({ path, mime, duration })
+    .select()
+    .single();
+  if (error) throw new Error(`insert: ${error.message}`);
+  return data;
+}
+
+// ——— helpers ———
+
+function normalizeState(state) {
+  if (!state || typeof state !== 'object' || !state.version) {
+    // fall back to a safe default; leader will overwrite on its first tick
+    return createInitialState(Date.now());
+  }
+  return state;
+}
+
+function withUrl(row) {
+  return { ...row, url: publicUrl(row.path) };
+}
+
+function extFor(mime) {
+  const m = (mime || '').toLowerCase();
+  if (m.includes('webm')) return 'webm';
+  if (m.includes('ogg'))  return 'ogg';
+  if (m.includes('mp4'))  return 'mp4';
+  if (m.includes('mpeg')) return 'mp3';
+  if (m.includes('wav'))  return 'wav';
+  return 'webm';
+}
+
+// legacy-compat shim so audio engine doesn't care where samples came from
+export { currentSamples as getSamples };

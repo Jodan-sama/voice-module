@@ -126,9 +126,14 @@ export class SampleBank {
     });
     // mono MediaRecorder output can collapse to one channel through some stereo
     // effects (pingpong / phaser / pitchshift). route each sample through a
-    // Panner with only a tiny random offset so it's forced into the stereo
-    // field and stays essentially centered.
-    const pan = new Tone.Panner(-0.15 + Math.random() * 0.3);
+    // Panner. most of the time the pan stays near center (±0.15); ~15% of
+    // the time a sample is intentionally pushed out to one side (0.3 to 0.75
+    // left or right) for stereo variety.
+    const wide = Math.random() < 0.15;
+    const panPos = wide
+      ? (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 0.45)
+      : -0.15 + Math.random() * 0.3;
+    const pan = new Tone.Panner(panPos);
     // +5 dB makeup so voices sit on top of the bed instead of behind it
     const vol = new Tone.Volume(Tone.gainToDb(Math.max(0.001, velocity)) + 5).connect(dest);
     player.connect(pan);

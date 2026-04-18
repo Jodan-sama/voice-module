@@ -8,6 +8,26 @@ export class SampleBank {
   constructor() {
     this.buffers = new Map(); // id -> Tone.ToneAudioBuffer
     this.samples = [];        // full list from soul
+    // diagnostics — how many trigger calls land vs. bail, and why
+    this.stats = { attempted: 0, played: 0, noSamples: 0, noneLoaded: 0, noBuffer: 0 };
+    this._lastStatsLog = performance.now();
+  }
+
+  logStats(now = performance.now()) {
+    if (now - this._lastStatsLog < 15000) return;
+    this._lastStatsLog = now;
+    const loadedCount = [...this.buffers.values()].filter(b => b.loaded).length;
+    // eslint-disable-next-line no-console
+    console.log('[samples]', {
+      pool: this.samples.length,
+      loaded: loadedCount,
+      attempts15s: this.stats.attempted,
+      played15s: this.stats.played,
+      skip_noSamples: this.stats.noSamples,
+      skip_noneLoaded: this.stats.noneLoaded,
+      skip_noBuffer: this.stats.noBuffer,
+    });
+    this.stats = { attempted: 0, played: 0, noSamples: 0, noneLoaded: 0, noBuffer: 0 };
   }
 
   update(samples) {
@@ -63,12 +83,16 @@ export class SampleBank {
    * @param {number} velocity          0..1
    */
   trigger(dest, semitones = 0, velocity = 0.7, when) {
+    this.stats.attempted++;
+    this.logStats();
+    if (!this.samples.length) { this.stats.noSamples++; return; }
     const sample = this.pickWeighted();
-    if (!sample) return;
+    if (!sample) { this.stats.noneLoaded++; return; }
     const buffer = this.buffers.get(sample.id);
-    if (!buffer || !buffer.loaded) return;
+    if (!buffer || !buffer.loaded) { this.stats.noBuffer++; return; }
     const duration = buffer.duration;
     if (duration <= 0.05) return;
+    this.stats.played++;
 
     // Three-bucket length distribution:
     //   15%  long    — 1.5s–4s capped to recording length

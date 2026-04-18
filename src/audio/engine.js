@@ -308,7 +308,9 @@ export class Engine {
     // per-note octave jitter, so vocals stay in their natural range even
     // when the melody drifts into lower octaves.
     if (this.samples.samples.length) {
-      const rate = (s.sampleTriggerRate ?? 0.25) * phaseAmp;
+      // floor the phase multiplier at 0.7 so voices don't thin out in
+      // breathing/waking; 'sleeping' already returned above.
+      const rate = (s.sampleTriggerRate ?? 0.25) * Math.max(0.7, phaseAmp);
       if (Math.random() < rate) {
         const vocalRef = { ...s, rootOctave: 3 };
         const vocalMidi = chordNoteMidi(vocalRef, chordRoot, step);

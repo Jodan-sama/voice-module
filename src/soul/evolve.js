@@ -224,7 +224,7 @@ function shiftArp(state) {
   if (chance(0.3)) state.arpSubdivision = pick([8, 8, 16, 16, 16]);
   if (chance(0.25)) state.restProb      = clamp((state.restProb ?? 0.2) + rand(-0.12, 0.12), 0.05, 0.5);
   if (chance(0.2)) state.tempoBpm       = clamp((state.tempoBpm ?? 96) + randi(-6, 6), 70, 128);
-  if (chance(0.3)) state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.22) + rand(-0.09, 0.09), 0.05, 0.6);
+  if (chance(0.3)) state.sampleTriggerRate = clamp((state.sampleTriggerRate ?? 0.22) + rand(-0.09, 0.09), 0.12, 0.6);
 }
 
 function shiftVoices(state) {

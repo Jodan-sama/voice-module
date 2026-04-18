@@ -9,55 +9,97 @@ const recordBtn = document.getElementById('record');
 const hint = document.getElementById('hint');
 const status = document.getElementById('status');
 
-// connect to the living soul ASAP — visuals can render before audio starts
 state.connect();
-
-// 3D scene runs immediately
 initScene(canvas);
 
-// audio needs a user gesture. iOS Safari is strict: the AudioContext.resume()
-// call has to happen synchronously inside a touch / click handler. We listen
-// for several gesture types to maximize coverage and call Tone.start() before
-// any await so the resume hits inside the gesture chain.
 const audio = new Engine();
+let audioReady = false;
 let audioStarting = false;
 
-async function startAudio() {
-  if (audioStarting || audio.started) return;
-  audioStarting = true;
+// ——— iOS / mobile audio unlock ———
+//
+// Mobile browsers, especially iOS Safari, only honor AudioContext.resume()
+// when it is called *synchronously* from a touch/click event. They also
+// often need a silent buffer played through the destination before WebAudio
+// will produce any sound. We do both inside the gesture handler before any
+// await, then continue async to build the engine graph.
+
+function rawCtx() {
+  const c = Tone.getContext();
+  return c?.rawContext || c?._context || c;
+}
+
+function syncUnlock() {
+  const ctx = rawCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+    try { ctx.resume(); } catch {}
+  }
+  // silent priming buffer — the classic iOS dodge
   try {
-    // 1. resume the context — must be the first thing inside the gesture
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch {}
+}
+
+async function startAudio() {
+  if (audioReady) return;
+
+  // sync unlock FIRST — must happen in the gesture
+  syncUnlock();
+
+  if (audioStarting) return;
+  audioStarting = true;
+
+  try {
+    status.textContent = 'unlocking…';
     await Tone.start();
+
     if (Tone.context.state !== 'running') {
-      // some iOS versions need an explicit second nudge
-      await Tone.context.resume();
+      // give the resume a tick to settle, then check again
+      await new Promise((r) => setTimeout(r, 60));
     }
     if (Tone.context.state !== 'running') {
-      throw new Error(`audio blocked (context ${Tone.context.state})`);
+      throw new Error(`blocked (${Tone.context.state}). check ringer switch`);
     }
-    // 2. now build the engine graph
-    await audio.start();
+
+    status.textContent = 'starting…';
+    // hard cap engine start so we never hang silent on screen
+    await Promise.race([
+      audio.start(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('engine start timed out')), 6000)),
+    ]);
+
+    audioReady = true;
     status.textContent = hint.textContent;
   } catch (e) {
     console.error('[audio] start failed', e, 'context state:', Tone.context?.state);
-    status.textContent = 'tap again to listen';
-    audioStarting = false;  // allow retry on next gesture
+    const msg = (e?.message || 'unknown').toLowerCase().slice(0, 100);
+    status.textContent = msg;
+    audioStarting = false;
+    setTimeout(() => {
+      if (!audioReady) status.textContent = 'tap again to listen';
+    }, 4000);
   }
 }
 
-// idempotent — register on every gesture type that might be the first one,
-// at both window level and on the record button (so recording-first paths
-// also unlock playback). capture-phase on the button so we run before the
-// recorder's own click handler.
-window.addEventListener('pointerdown', startAudio);
-window.addEventListener('touchstart',  startAudio, { passive: true });
-window.addEventListener('click',       startAudio);
-window.addEventListener('keydown',     startAudio);
-recordBtn.addEventListener('pointerdown', startAudio, { capture: true });
-recordBtn.addEventListener('touchstart',  startAudio, { capture: true, passive: true });
+// register on every gesture path that might fire first. on iOS, touchstart
+// and click are the reliable ones; pointerdown isn't always honored. each
+// handler is idempotent, so multiple firings are fine.
+window.addEventListener('touchstart', startAudio, { passive: true });
+window.addEventListener('click', startAudio);
+window.addEventListener('keydown', startAudio);
+// also unlock when the record button is the first thing tapped, before its
+// own click handler runs
+recordBtn.addEventListener('touchstart', startAudio, { capture: true, passive: true });
+recordBtn.addEventListener('click', startAudio, { capture: true });
 
 // show phase in the status line
 state.on('phase', (phase) => {
+  if (!audioReady) return;
   const word = {
     waking: 'stirring',
     awake: 'playing',

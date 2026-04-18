@@ -118,7 +118,8 @@ export class Engine {
     this.tailGain = new Tone.Gain(0.55).connect(this.master);
     this.tailBus.connect(this.tailReverb);
     this.tailReverb.connect(this.tailGain);
-    await this.tailReverb.generate().catch(() => {});
+    // fire-and-forget IR generation — don't block engine start on a slow phone
+    this.tailReverb.generate().catch(() => {});
     // send from post-effects into the tail — arrives already coloured
     this.effects.output.connect(this.tailBus);
 

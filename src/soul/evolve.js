@@ -393,9 +393,13 @@ export function chordNoteMidi(state, chordRootDeg, step) {
 // default is 1 day; upload rolls dice and occasionally mints a week / month / year / two-year fragment.
 export const SAMPLE_LIFESPAN_MS = 24 * 60 * 60 * 1000; // 1 day
 export function sampleLife(sample, now = Date.now()) {
+  if (!sample?.created_at) return 1;
   const created = new Date(sample.created_at).getTime();
-  const span = Number(sample.lifespan_ms) || SAMPLE_LIFESPAN_MS;
+  if (!isFinite(created)) return 1;
+  const rawSpan = Number(sample.lifespan_ms);
+  const span = isFinite(rawSpan) && rawSpan > 0 ? rawSpan : SAMPLE_LIFESPAN_MS;
   const age = now - created;
+  if (!isFinite(age) || age < 0) return 1;
   return Math.max(0, 1 - age / span);
 }
 

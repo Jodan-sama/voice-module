@@ -12,8 +12,10 @@ export class SampleBank {
 
   update(samples) {
     this.samples = samples || [];
-    // prefetch fresh ones
-    for (const s of this.samples.slice(0, 8)) this._ensureLoaded(s);
+    // prefetch all samples — previously we only loaded the first 8, which meant
+    // once the pool grew past 8, older voices could never be picked because
+    // their buffers never became `loaded`.
+    for (const s of this.samples) this._ensureLoaded(s);
     // prune buffers for samples no longer present
     const present = new Set(this.samples.map(s => s.id));
     for (const id of [...this.buffers.keys()]) {

@@ -52,17 +52,21 @@ export function createInitialState(now = Date.now()) {
   return {
     key: pick(KEYS),
     scale: pick(SCALE_NAMES),
-    tempoBpm: Math.round(rand(84, 118)),      // quicker default feel
-    rootOctave: 3,
+    tempoBpm: Math.round(rand(84, 118)),
+    rootOctave: randi(2, 3),                   // 2–3 at birth; drifts 2–4 later
     arpPattern: pick(ARP_PATTERNS),
     arpSteps: randi(6, 12),
     arpGate: rand(0.35, 0.75),
-    arpSubdivision: pick([8, 8, 16, 16, 16]), // faster bias
-    restProb: rand(0.12, 0.28),               // space to breathe
+    arpSubdivision: pick([8, 8, 16, 16, 16]),
+    restProb: rand(0.12, 0.28),
+    swing: chance(0.4) ? rand(0.2, 0.55) : 0,  // sometimes swings, sometimes straight
+    swingSubdivision: pick([8, 16]),
+    burstProb: rand(0.0, 0.10),                // some steps fire a sub-note at double speed
     progression: pick(PROGRESSIONS).slice(),
     beatsPerChord: pick([4, 4, 8, 8, 16]),
     progressionAnchorAt: now,
     effects: spawnEffects(),
+    secondaryMelody: null,                     // spawned/cleared over time; see shiftSecondary
     backgroundRhythm: spawnRhythm(),
     phase: 'waking',
     phaseUntil: now + randi(10, 25) * 1000,
@@ -70,7 +74,7 @@ export function createInitialState(now = Date.now()) {
     sampleTriggerRate: rand(0.15, 0.45),
     voiceTarget: randomVoiceTarget(),
     bornAt: now,
-    version: 2,
+    version: 3,
   };
 }
 
@@ -134,7 +138,7 @@ function randomVoiceTarget() {
 
 // ——— evolution step. Returns true if `state` was mutated. ———
 export function tickEvolution(state, now = Date.now()) {
-  if (!state || state.version !== 2) {
+  if (!state || state.version !== 3) {
     // either brand new or older schema — regenerate, but keep bornAt if present
     const bornAt = state?.bornAt || now;
     Object.assign(state, createInitialState(now));
@@ -152,11 +156,13 @@ export function tickEvolution(state, now = Date.now()) {
 
   const awake = state.phase === 'awake' || state.phase === 'waking';
 
-  if (awake && chance(0.025)) { shiftEffect(state); changed = true; }
-  if (awake && chance(0.010)) { shiftArp(state);    changed = true; }
-  if (awake && chance(0.006)) { shiftVoices(state); changed = true; }
+  if (awake && chance(0.025)) { shiftEffect(state);      changed = true; }
+  if (awake && chance(0.010)) { shiftArp(state);         changed = true; }
+  if (awake && chance(0.006)) { shiftVoices(state);      changed = true; }
   if (awake && chance(0.004)) { shiftProgression(state, now); changed = true; }
-  if (awake && chance(0.003)) { shiftKey(state);    changed = true; }
+  if (awake && chance(0.003)) { shiftKey(state);         changed = true; }
+  if (awake && chance(0.005)) { shiftFeel(state);        changed = true; }
+  if (awake && chance(0.004)) { shiftSecondary(state);   changed = true; }
   if (chance(0.003))          { state.backgroundRhythm = spawnRhythm(); changed = true; }
 
   return changed;
@@ -249,6 +255,89 @@ function shiftKey(state) {
   const shifts = [-5, -2, 2, 3, 5, 7];
   state.key = KEYS[((idx >= 0 ? idx : 0) + pick(shifts) + 12) % 12];
   if (chance(0.4)) state.scale = pick(SCALE_NAMES);
+  // occasionally drift the root octave down a couple or up one — range 2..4
+  if (chance(0.35)) {
+    const step = pick([-2, -1, -1, -1, 1]);   // weighted to go lower
+    state.rootOctave = clamp((state.rootOctave ?? 3) + step, 2, 4);
+  }
+}
+
+// feel: swing, burst probability, micro-timing variations on the arp grid
+function shiftFeel(state) {
+  const patch = {};
+  if (chance(0.5)) {
+    // toggle swing in/out, or nudge amount
+    if ((state.swing ?? 0) > 0 && chance(0.35)) {
+      state.swing = 0;  // straighten out
+    } else {
+      state.swing = rand(0.15, 0.55);
+      state.swingSubdivision = pick([8, 16]);
+    }
+  }
+  if (chance(0.5)) {
+    // bursts: chance that any given step fires a quick double-speed sub-note
+    state.burstProb = clamp((state.burstProb ?? 0.05) + rand(-0.05, 0.07), 0, 0.18);
+  }
+}
+
+function shiftSecondary(state) {
+  const sec = state.secondaryMelody;
+  if (!sec) {
+    // 35% chance we actually spawn one when this function fires
+    if (chance(0.35)) state.secondaryMelody = spawnSecondary(state);
+  } else {
+    // 25% of the time we retire the secondary; otherwise tweak or replace it
+    if (chance(0.25)) {
+      state.secondaryMelody = null;
+    } else if (chance(0.4)) {
+      state.secondaryMelody = spawnSecondary(state);   // full replace, different voice/fx
+    } else {
+      const next = { ...sec };
+      if (chance(0.5)) next.pattern      = pick(ARP_PATTERNS);
+      if (chance(0.4)) next.restProb     = clamp((next.restProb ?? 0.3) + rand(-0.1, 0.1), 0.05, 0.6);
+      if (chance(0.3)) next.gate         = clamp((next.gate ?? 0.45) + rand(-0.15, 0.15), 0.2, 1.0);
+      if (chance(0.3)) next.subdivision  = pick([8, 16]);
+      if (chance(0.25)) next.octaveOffset = pick([-1, 0, 1, 1]);
+      state.secondaryMelody = next;
+    }
+  }
+}
+
+function spawnSecondary(state) {
+  // pick a voice that isn't already dominant in the primary blend, so the two
+  // melodies have contrasting timbres
+  const primary = state.voiceTarget || {};
+  const dominant = VOICE_NAMES.filter(v => (primary[v] ?? 0) >= 0.4);
+  const contrast = VOICE_NAMES.filter(v => !dominant.includes(v));
+  const voice = pick(contrast.length ? contrast : VOICE_NAMES);
+  return {
+    pattern:      pick(ARP_PATTERNS),
+    steps:        randi(4, 8),
+    subdivision:  pick([8, 16]),
+    gate:         rand(0.3, 0.6),
+    voice,
+    octaveOffset: pick([-1, 0, 1, 1]),
+    restProb:     rand(0.2, 0.45),
+    // separate effect chain: 0-2 small effects, skewed gentle
+    effects:      spawnSecondaryEffects(),
+  };
+}
+
+function spawnSecondaryEffects() {
+  // pool that skips the harsh bitcrush entirely and biases toward space/modulation
+  const pool = ['reverb', 'delay', 'pingpong', 'chorus', 'phaser', 'autofilter', 'vibrato', 'pitchshift', 'tremolo'];
+  const n = randi(0, 2);
+  const out = [];
+  const local = [...pool];
+  for (let i = 0; i < n && local.length; i++) {
+    const idx = (Math.random() * local.length) | 0;
+    const name = local.splice(idx, 1)[0];
+    const def = effectDefaults(name);
+    // secondary effects are a touch wetter than primary so the melody sits in its own space
+    if ('wet' in def) def.wet = clamp(def.wet * 1.15, 0, 1);
+    out.push(def);
+  }
+  return out;
 }
 
 // ——— every-frame pulse ———

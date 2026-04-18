@@ -97,6 +97,9 @@ export class Engine {
     this._lastEffectsSig = null;
     this._lastArpSig = null;
     this._lastArpSub = null;
+    this._lastSwing = null;
+    // secondary melody pieces — lazily built when state.secondaryMelody exists
+    this.secondary = null;  // { synth, fx, gain, loop, voice, idx, order, lastSig }
   }
 
   async start() {
@@ -237,15 +240,99 @@ export class Engine {
 
     this._triggerVoice(time, s, midi, vel * phaseAmp, noteLen);
 
+    // burst: fire a second, double-speed sub-note mid-step for rhythmic variety
+    if ((s.burstProb ?? 0) > 0 && Math.random() < s.burstProb) {
+      const stepSec = (60 / (s.tempoBpm || 96)) * (4 / (s.arpSubdivision || 16));
+      const burstTime = time + stepSec * 0.5;
+      const nextMidi = chordNoteMidi(sCopy, chordRoot, step + 1);
+      this._triggerVoice(burstTime, s, nextMidi, vel * phaseAmp * 0.85, noteLen * 0.5);
+    }
+
     // maybe trigger a voice fragment, pitched to the current arp note
     if (this.samples.samples.length) {
       const rate = (s.sampleTriggerRate ?? 0.25) * phaseAmp;
       if (Math.random() < rate) {
         const semitones = midi - 60 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -12 : 12) : 0);
-        // velocity bumped from 0.4–0.75 to 0.65–1.0 — voices were sitting too far back
         this.samples.trigger(this.effects.input, semitones, 0.65 + Math.random() * 0.35, time);
       }
     }
+  }
+
+  // ——— secondary melody: independent synth + FX + loop, aligned to the transport ———
+
+  _syncSecondary(state) {
+    const cfg = state?.secondaryMelody;
+    if (!cfg) {
+      if (this.secondary) this._teardownSecondary();
+      return;
+    }
+    const sig = JSON.stringify({
+      v: cfg.voice, sub: cfg.subdivision, fx: cfg.effects,
+    });
+    if (this.secondary && this.secondary.sig === sig) {
+      // quick pattern/steps/gate/rest updates are consumed live; nothing to do
+      return;
+    }
+    // rebuild (first time, voice swap, subdivision change, or effects change)
+    this._teardownSecondary();
+    const voiceName = VOICE_NAMES.includes(cfg.voice) ? cfg.voice : pick(VOICE_NAMES);
+    const synth = VOICE_FACTORIES[voiceName]();
+    const gain = new Tone.Gain(0.55);
+    const fx = new EffectChain(gain);
+    fx.setEffects(cfg.effects || []);
+    synth.connect(fx.input);
+    gain.connect(this.breathGain);           // rides the breath envelope like the rest
+    gain.connect(this.tailBus);              // also feeds the persistent reverb tail
+    const interval = `${cfg.subdivision || 16}n`;
+    const loop = new Tone.Loop((time) => this._onSecondaryTick(time), interval).start(0);
+    this.secondary = {
+      sig, synth, fx, gain, loop,
+      voice: voiceName,
+      idx: 0,
+      order: [],
+      lastPatternSig: null,
+    };
+  }
+
+  _teardownSecondary() {
+    if (!this.secondary) return;
+    try { this.secondary.loop.dispose(); } catch {}
+    try { this.secondary.synth.dispose(); } catch {}
+    try { this.secondary.fx.dispose(); } catch {}
+    try { this.secondary.gain.dispose(); } catch {}
+    this.secondary = null;
+  }
+
+  _onSecondaryTick(time) {
+    const s = state.snapshot();
+    const cfg = s?.secondaryMelody;
+    const sec = this.secondary;
+    if (!s || !cfg || !sec) return;
+    if (s.phase === 'sleeping') return;
+
+    // rebuild the pattern order if arp shape changed
+    const patSig = `${cfg.pattern}:${cfg.steps}`;
+    if (sec.lastPatternSig !== patSig) {
+      sec.order = expandArp(cfg.pattern, cfg.steps);
+      sec.idx = 0;
+      sec.lastPatternSig = patSig;
+    }
+    if (sec.idx >= sec.order.length) sec.idx = 0;
+    const step = sec.order[sec.idx++] ?? 0;
+
+    const phaseAmp = s.phase === 'breathing' ? 0.4 : s.phase === 'waking' ? 0.65 : 0.95;
+    const restBias = s.phase === 'breathing' ? 0.2 : 0;
+    const restProb = Math.min(0.7, (cfg.restProb ?? 0.3) + restBias);
+    if (Math.random() < restProb) return;
+
+    const chordRoot = currentChordRoot(s, Date.now());
+    const octaveOffset = cfg.octaveOffset ?? 0;
+    const sCopy = { ...s, rootOctave: (s.rootOctave || 3) + octaveOffset };
+    const midi = chordNoteMidi(sCopy, chordRoot, step);
+    const note = Tone.Frequency(midi, 'midi').toNote();
+    const noteLen = (cfg.gate ?? 0.45) * (60 / (s.tempoBpm || 96)) * 0.5;
+    const vel = (0.28 + Math.random() * 0.22) * phaseAmp;
+    try { sec.synth.triggerAttackRelease(note, noteLen, time, vel); } catch {}
   }
 
   _triggerVoice(time, state, midi, velocity, duration) {
@@ -325,6 +412,14 @@ export class Engine {
       Tone.Transport.bpm.value = now.tempoBpm ?? 96;
     }
 
+    // swing is cheap to apply every time it changes
+    const swingSig = `${now.swing ?? 0}:${now.swingSubdivision ?? 8}`;
+    if (swingSig !== this._lastSwing) {
+      Tone.Transport.swing = now.swing ?? 0;
+      Tone.Transport.swingSubdivision = `${now.swingSubdivision || 8}n`;
+      this._lastSwing = swingSig;
+    }
+
     // arp pattern rebuild only when pattern or step count actually differs.
     // realtime patches contain every field, so a naive check causes
     // rebuilds on every tempo/effect/voice drift — that's the click source.
@@ -347,6 +442,9 @@ export class Engine {
       this.effects.setEffects(now.effects || []);
       this._lastEffectsSig = fxSig;
     }
+
+    // secondary melody: create/destroy/swap as needed
+    this._syncSecondary(now);
     // voice target is applied continuously by _driftVoiceBlend — nothing to do here
   }
 

@@ -68,19 +68,19 @@ export class SampleBank {
     const duration = buffer.duration;
     if (duration <= 0.05) return;
 
-    // ~15% of the time, play a longer chunk (1.5–4s capped to recording length)
-    // so big phrases occasionally come through; otherwise the usual short bias.
+    // ~15% of the time, play a longer chunk (1.5–4s capped to recording length).
+    // for the short bucket, max is 1.8s and the bias is softened (r^1.3 instead
+    // of r^2), so clips in the 1–2s range are meaningfully more common.
     const goLong = Math.random() < 0.15 && duration >= 1.6;
     let fragLen;
     if (goLong) {
       const longMax = Math.min(4.0, duration * 0.9);
       fragLen = 1.5 + Math.random() * Math.max(0, longMax - 1.5);
-      // soften long fragments a touch so they sit under the arp instead of dominating
-      velocity *= 0.7;
+      velocity *= 0.7;  // soften long fragments so they sit under the arp
     } else {
-      const minLen = 0.08;
-      const maxLen = Math.min(1.2, duration * 0.9);
-      fragLen = minLen + Math.pow(Math.random(), 2) * (maxLen - minLen);
+      const minLen = 0.12;
+      const maxLen = Math.min(1.8, duration * 0.9);
+      fragLen = minLen + Math.pow(Math.random(), 1.3) * (maxLen - minLen);
     }
     const start = Math.random() * Math.max(0.0001, duration - fragLen - 0.01);
 

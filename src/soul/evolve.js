@@ -19,7 +19,11 @@ export const SCALES = {
 };
 const SCALE_NAMES = Object.keys(SCALES);
 export const ARP_PATTERNS = ['up', 'down', 'updown', 'random', 'converge', 'alt'];
-const EFFECT_NAMES = ['reverb', 'delay', 'chorus', 'filter', 'bitcrush', 'pingpong', 'tremolo'];
+const EFFECT_NAMES = [
+  'reverb', 'delay', 'chorus', 'filter', 'pingpong', 'tremolo',
+  'phaser', 'autofilter', 'vibrato', 'pitchshift',
+  'bitcrush',  // last — also weighted lower at pick time
+];
 
 // pleasing progressions in scale degrees — work across minor/dorian/etc.
 // (roots are 0-indexed scale degrees: 0=i, 1=ii, 2=iii, …)
@@ -72,7 +76,8 @@ export function createInitialState(now = Date.now()) {
 
 function spawnEffects() {
   const n = randi(2, 4);
-  const pool = [...EFFECT_NAMES];
+  // bitcrush is harsh — let it through only ~25% of the time so most incarnations are gentler
+  const pool = EFFECT_NAMES.filter((nm) => nm !== 'bitcrush' || Math.random() < 0.25);
   const out = [];
   for (let i = 0; i < n && pool.length; i++) {
     const idx = (Math.random() * pool.length) | 0;
@@ -83,13 +88,18 @@ function spawnEffects() {
 
 function effectDefaults(name) {
   switch (name) {
-    case 'reverb':   return { name, wet: rand(0.2, 0.55), decay: rand(2.5, 8), preDelay: rand(0.01, 0.05) };
-    case 'delay':    return { name, wet: rand(0.15, 0.4), time: pick(['8n','8n.','4n','4n.','16n']), feedback: rand(0.3, 0.6) };
-    case 'pingpong': return { name, wet: rand(0.15, 0.4), time: pick(['8n','8n.','4n']), feedback: rand(0.25, 0.55) };
-    case 'chorus':   return { name, wet: rand(0.2, 0.5), freq: rand(0.2, 2.2), depth: rand(0.3, 0.8) };
-    case 'filter':   return { name, wet: 1.0, cutoff: rand(400, 3200), q: rand(0.4, 6), lfoRate: rand(0.04, 0.5), lfoDepth: rand(0.2, 0.9) };
-    case 'bitcrush': return { name, wet: rand(0.1, 0.35), bits: randi(4, 8) };
-    case 'tremolo':  return { name, wet: rand(0.25, 0.6), freq: rand(0.8, 6), depth: rand(0.3, 0.8) };
+    case 'reverb':     return { name, wet: rand(0.2, 0.55), decay: rand(2.5, 8), preDelay: rand(0.01, 0.05) };
+    case 'delay':      return { name, wet: rand(0.15, 0.4), time: pick(['8n','8n.','4n','4n.','16n']), feedback: rand(0.3, 0.6) };
+    case 'pingpong':   return { name, wet: rand(0.15, 0.4), time: pick(['8n','8n.','4n']), feedback: rand(0.25, 0.55) };
+    case 'chorus':     return { name, wet: rand(0.2, 0.5), freq: rand(0.2, 2.2), depth: rand(0.3, 0.8) };
+    case 'filter':     return { name, wet: 1.0, cutoff: rand(400, 3200), q: rand(0.4, 3), lfoRate: rand(0.04, 0.5), lfoDepth: rand(0.2, 0.9) };
+    case 'tremolo':    return { name, wet: rand(0.25, 0.6), freq: rand(0.8, 6), depth: rand(0.3, 0.8) };
+    case 'phaser':     return { name, wet: rand(0.25, 0.55), freq: rand(0.1, 1.4), octaves: randi(2, 5), baseFreq: rand(180, 700) };
+    case 'autofilter': return { name, wet: rand(0.3, 0.65), freq: rand(0.1, 2.5), depth: rand(0.4, 0.95), baseFreq: rand(150, 600), octaves: randi(2, 4) };
+    case 'vibrato':    return { name, wet: rand(0.3, 0.6), freq: rand(2.5, 6.5), depth: rand(0.04, 0.18) };
+    case 'pitchshift': return { name, wet: rand(0.12, 0.3), pitch: pick([-12, -7, -5, 5, 7, 12]), windowSize: 0.06 };
+    // bitcrush is now gentle: small wet, higher bits — rarely abrasive
+    case 'bitcrush':   return { name, wet: rand(0.05, 0.15), bits: randi(7, 10) };
     default: return { name, wet: 0.25 };
   }
 }
@@ -182,7 +192,9 @@ function shiftEffect(state) {
     if (fx.length >= 4 || (fx.length > 1 && chance(0.5))) {
       fx.splice((Math.random() * fx.length) | 0, 1);
     } else {
-      const available = EFFECT_NAMES.filter(n => !fx.find(e => e.name === n));
+      const available = EFFECT_NAMES
+        .filter((n) => !fx.find((e) => e.name === n))
+        .filter((n) => n !== 'bitcrush' || Math.random() < 0.25);
       if (available.length) fx.push(effectDefaults(pick(available)));
     }
   } else {

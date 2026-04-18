@@ -62,11 +62,46 @@ export class EffectChain {
         return { in: filter, out: filter, dispose: () => { try { lfo.stop(); lfo.dispose(); } catch {} filter.dispose(); } };
       }
       case 'bitcrush': {
-        const n = new Tone.BitCrusher({ bits: cfg.bits ?? 6, wet });
+        const n = new Tone.BitCrusher({ bits: cfg.bits ?? 8, wet });
         return wrap(n, () => n.dispose());
       }
       case 'tremolo': {
         const n = new Tone.Tremolo({ frequency: cfg.freq ?? 4, depth: cfg.depth ?? 0.6, wet }).start();
+        return wrap(n, () => n.dispose());
+      }
+      case 'phaser': {
+        const n = new Tone.Phaser({
+          frequency: cfg.freq ?? 0.5,
+          octaves: cfg.octaves ?? 3,
+          baseFrequency: cfg.baseFreq ?? 350,
+          wet,
+        });
+        return wrap(n, () => n.dispose());
+      }
+      case 'autofilter': {
+        const n = new Tone.AutoFilter({
+          frequency: cfg.freq ?? 0.7,
+          depth: cfg.depth ?? 0.7,
+          baseFrequency: cfg.baseFreq ?? 250,
+          octaves: cfg.octaves ?? 3,
+          wet,
+        }).start();
+        return wrap(n, () => n.dispose());
+      }
+      case 'vibrato': {
+        const n = new Tone.Vibrato({
+          frequency: cfg.freq ?? 4,
+          depth: cfg.depth ?? 0.1,
+          wet,
+        });
+        return wrap(n, () => n.dispose());
+      }
+      case 'pitchshift': {
+        const n = new Tone.PitchShift({
+          pitch: cfg.pitch ?? 7,
+          windowSize: cfg.windowSize ?? 0.06,
+          wet,
+        });
         return wrap(n, () => n.dispose());
       }
       default: return null;

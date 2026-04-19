@@ -100,11 +100,13 @@ export class SampleBank {
     } else if (r < 0.65) {
       const minLen = 0.4;
       const maxLen = Math.min(1.8, duration * 0.9);
-      fragLen = minLen + Math.pow(Math.random(), 1.3) * (maxLen - minLen);
+      // softer bias (was r^1.3) — pulls the median up from ~0.97s to ~1.1s
+      fragLen = minLen + Math.pow(Math.random(), 1.1) * (maxLen - minLen);
     } else {
       const minLen = 0.06;
       const maxLen = Math.min(0.3, duration * 0.9);
-      fragLen = minLen + Math.pow(Math.random(), 1.5) * (maxLen - minLen);
+      // softer bias (was r^1.5) — pulls the median up from ~0.14s to ~0.18s
+      fragLen = minLen + Math.pow(Math.random(), 1.2) * (maxLen - minLen);
     }
     // floor the effective velocity so no voice fragment ever lands
     // inaudible — minimum ~-6 dB pre-makeup so voices always sit up.

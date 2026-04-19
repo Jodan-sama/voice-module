@@ -278,7 +278,7 @@ export class Engine {
       if (Math.random() < rate) {
         const vocalRef = { ...s, rootOctave: 3 };
         const vocalMidi = chordNoteMidi(vocalRef, chordRoot, step);
-        const semitones = vocalMidi - 60 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -12 : 12) : 0);
+        const semitones = vocalMidi - 60 + (Math.random() < 0.18 ? (Math.random() < 0.5 ? -12 : 12) : 0);
         this.samples.trigger(this.effects.input, semitones, 0.65 + Math.random() * 0.35, time);
       }
     }

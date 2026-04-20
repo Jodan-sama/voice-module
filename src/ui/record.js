@@ -128,9 +128,12 @@ function pickMime() {
   return '';
 }
 
-// Decode an arbitrary mime blob via AudioContext and produce a 16-bit PCM
-// WAV blob with correct headers. Preserves channel count and sample rate.
-async function webmToWav(blob) {
+// Decode an arbitrary mime blob via AudioContext, resample to a target rate,
+// mix down to mono, and produce a 16-bit PCM WAV blob with correct headers.
+// At the defaults (22050 Hz, mono) a 5s clip is ~220 KB — a ~2× reduction
+// from 48 kHz mono and ~45× from 48 kHz stereo. Voice content sits well
+// within 22 kHz Nyquist; intelligibility is fine.
+async function webmToWav(blob, { targetRate = 22050, mono = true } = {}) {
   const arrayBuffer = await blob.arrayBuffer();
   const Ctx = window.AudioContext || window.webkitAudioContext;
   const decoder = new Ctx();
@@ -138,14 +141,30 @@ async function webmToWav(blob) {
   try {
     audioBuffer = await decoder.decodeAudioData(arrayBuffer.slice(0));
   } finally {
-    // don't keep a second AudioContext alive past decode
     decoder.close?.();
   }
-  const { sampleRate, numberOfChannels, length, duration } = audioBuffer;
-  // interleave channels into one Float32Array
+
+  // resample + mixdown via OfflineAudioContext if the source doesn't already
+  // match our target shape. connecting a multi-channel source to a single-
+  // channel destination triggers the browser's automatic downmix.
+  const needsResample = audioBuffer.sampleRate !== targetRate
+    || (mono && audioBuffer.numberOfChannels !== 1);
+  let out = audioBuffer;
+  if (needsResample) {
+    const outChannels = mono ? 1 : audioBuffer.numberOfChannels;
+    const outLength  = Math.max(1, Math.ceil(audioBuffer.duration * targetRate));
+    const offline = new OfflineAudioContext(outChannels, outLength, targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(offline.destination);
+    src.start(0);
+    out = await offline.startRendering();
+  }
+
+  const { sampleRate, numberOfChannels, length, duration } = out;
   const interleaved = new Float32Array(length * numberOfChannels);
   for (let c = 0; c < numberOfChannels; c++) {
-    const chan = audioBuffer.getChannelData(c);
+    const chan = out.getChannelData(c);
     for (let i = 0; i < length; i++) {
       interleaved[i * numberOfChannels + c] = chan[i];
     }

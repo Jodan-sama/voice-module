@@ -5,6 +5,7 @@ import { Engine } from './audio/engine.js';
 import { initRecord } from './ui/record.js';
 
 const canvas = document.getElementById('stage');
+const glowEl = document.getElementById('glow');
 const recordBtn = document.getElementById('record');
 const hint = document.getElementById('hint');
 const status = document.getElementById('status');
@@ -13,6 +14,58 @@ state.connect();
 initScene(canvas);
 
 const audio = new Engine();
+
+// ——— cloud load indicator ———
+// yellow while any sample buffer is in flight, neon-green flash when the last
+// one finishes, red flash on any failure. capped at 5s regardless. the glow
+// rides on a fixed-position full-viewport div (#glow) with an inset box-shadow.
+
+const GLOW_MAX_MS = 5000;
+const GLOW_YELLOW = 'inset 0 0 140px 28px rgba(245, 210, 70, 0.42)';
+const GLOW_GREEN  = 'inset 0 0 160px 32px rgba(60, 245, 140, 0.55)';
+const GLOW_RED    = 'inset 0 0 170px 36px rgba(245, 80, 80, 0.55)';
+let glowTimer = null;
+let pendingLoads = 0;
+let loadsStarted = 0;
+let loadsSucceeded = 0;
+let loadsFailed = 0;
+
+function setGlow(boxShadow, holdMs) {
+  if (glowTimer) clearTimeout(glowTimer);
+  if (glowEl) glowEl.style.boxShadow = boxShadow;
+  glowTimer = setTimeout(() => {
+    if (glowEl) glowEl.style.boxShadow = '';
+    glowTimer = null;
+  }, Math.min(holdMs, GLOW_MAX_MS));
+}
+
+audio.samples.setLoadListener(({ phase }) => {
+  if (phase === 'start') {
+    pendingLoads++;
+    loadsStarted++;
+    setGlow(GLOW_YELLOW, GLOW_MAX_MS);
+  } else if (phase === 'success') {
+    pendingLoads = Math.max(0, pendingLoads - 1);
+    loadsSucceeded++;
+    if (pendingLoads === 0) setGlow(GLOW_GREEN, 1400);
+  } else if (phase === 'fail') {
+    pendingLoads = Math.max(0, pendingLoads - 1);
+    loadsFailed++;
+    setGlow(GLOW_RED, 3500);   // red takes priority over pending-yellow
+  }
+});
+
+// report aggregate load health every 20s so the console has a running pulse
+setInterval(() => {
+  console.log('[cloud] sample-loads 20s window:', {
+    started: loadsStarted,
+    succeeded: loadsSucceeded,
+    failed: loadsFailed,
+    pending: pendingLoads,
+    poolSize: state.currentSamples().length,
+  });
+  loadsStarted = 0; loadsSucceeded = 0; loadsFailed = 0;
+}, 20000);
 let audioReady = false;
 let audioStarting = false;
 

@@ -27,6 +27,19 @@ html, body {
   touch-action: none;
 }
 
+/* Debug/status glow — edges of the viewport pulse while samples are loading
+   (yellow), flash on success (neon green), flash red on failure. Fades out
+   in under 5s regardless. See main.js for the state machine. */
+#glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 0 transparent;
+  transition: box-shadow 700ms ease;
+  z-index: 2;
+  mix-blend-mode: screen;
+}
+
 #record {
   position: fixed;
   left: 50%;

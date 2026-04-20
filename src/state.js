@@ -128,6 +128,44 @@ export async function connect() {
   emit('change', current);
   emit('sample', samples);
 
+  // ——— one-time cloud status log, everything a human would want to see to
+  // confirm the Supabase side is alive and we're getting real rows back ———
+  const elders = samples.filter((s) => Number(s.lifespan_ms) > SAMPLE_LIFESPAN_MS);
+  const fresh  = samples.filter((s) => Number(s.lifespan_ms) <= SAMPLE_LIFESPAN_MS);
+  const byTier = samples.reduce((acc, s) => {
+    const ms = Number(s.lifespan_ms);
+    const label =
+      ms >= 2 * 365 * 24 * 3600 * 1000 ? '2y' :
+      ms >=     365 * 24 * 3600 * 1000 ? '1y' :
+      ms >=      30 * 24 * 3600 * 1000 ? '1m' :
+      ms >=       7 * 24 * 3600 * 1000 ? '1w' :
+      ms >=            24 * 3600 * 1000 ? '1d' : '<1d';
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+  console.log('[cloud] supabase connection check', {
+    url: import.meta.env.VITE_SUPABASE_URL || '(missing VITE_SUPABASE_URL!)',
+    soulRowPresent: !!soul,
+    soulError: se?.message || null,
+    poolSize: samples.length,
+    freshCount: fresh.length,
+    elderCount: elders.length,
+    tierBreakdown: byTier,
+    sampleUrlExample: samples[0]?.url || '(pool is empty)',
+    oldestCreatedAt: samples.length ? samples.reduce((a, b) => new Date(a.created_at) < new Date(b.created_at) ? a : b).created_at : null,
+    newestCreatedAt: samples.length ? samples.reduce((a, b) => new Date(a.created_at) > new Date(b.created_at) ? a : b).created_at : null,
+  });
+  if (samples[0]?.url) {
+    // kick a HEAD request at the first sample's public URL — if the bucket
+    // is misconfigured (not public, wrong policy, expired link), this 404s
+    // or 403s and tells us why loads are failing.
+    fetch(samples[0].url, { method: 'HEAD' })
+      .then((r) => console.log('[cloud] sample URL reachability:', {
+        status: r.status, ok: r.ok, contentType: r.headers.get('content-type'), contentLength: r.headers.get('content-length'),
+      }))
+      .catch((err) => console.warn('[cloud] sample URL HEAD failed:', err));
+  }
+
   // 2. subscribe to realtime changes
   supabase
     .channel(SOUL_CHANNEL)

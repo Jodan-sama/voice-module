@@ -10,7 +10,13 @@ export class SampleBank {
     // diagnostics — how many trigger calls land vs. bail, and why
     this.stats = { attempted: 0, played: 0, noSamples: 0, noneLoaded: 0, noBuffer: 0 };
     this._lastStatsLog = performance.now();
+    // optional callback for load lifecycle observability — main.js wires this
+    // up to drive the on-screen yellow/green/red glow.
+    this.loadListener = null;
   }
+
+  setLoadListener(cb) { this.loadListener = cb; }
+  _emitLoad(payload) { try { this.loadListener?.(payload); } catch (e) { console.error(e); } }
 
   logStats(now = performance.now()) {
     if (now - this._lastStatsLog < 15000) return;
@@ -48,10 +54,18 @@ export class SampleBank {
 
   _ensureLoaded(s) {
     if (this.buffers.has(s.id)) return;
-    const buf = new Tone.ToneAudioBuffer(s.url, () => {}, (err) => {
-      console.warn('sample load failed', s.id, err);
-      this.buffers.delete(s.id);
-    });
+    this._emitLoad({ phase: 'start', id: s.id, url: s.url });
+    const buf = new Tone.ToneAudioBuffer(
+      s.url,
+      () => {
+        this._emitLoad({ phase: 'success', id: s.id });
+      },
+      (err) => {
+        console.warn('[samples] load failed', s.id, s.url, err);
+        this._emitLoad({ phase: 'fail', id: s.id, error: err });
+        this.buffers.delete(s.id);
+      }
+    );
     this.buffers.set(s.id, buf);
   }
 

@@ -3,6 +3,14 @@ import * as state from './state.js';
 import { initScene } from './scene/scene.js';
 import { Engine } from './audio/engine.js';
 import { initRecord } from './ui/record.js';
+import { migrateAllSamples } from './ui/migrate.js';
+
+// DevTools-only: convert every non-WAV sample in the bucket to 22 kHz mono
+// WAV in place. idempotent, safe to re-run. see src/ui/migrate.js for options.
+// usage:
+//   await __migrateSamples({ dryRun: true })  // just report, no writes
+//   await __migrateSamples()                   // do it for real
+window.__migrateSamples = migrateAllSamples;
 
 const canvas = document.getElementById('stage');
 const glowEl = document.getElementById('glow');

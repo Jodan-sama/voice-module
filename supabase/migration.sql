@@ -82,12 +82,14 @@ drop policy if exists "soul read"         on public.soul;
 drop policy if exists "soul update"       on public.soul;
 drop policy if exists "samples read"      on public.samples;
 drop policy if exists "samples insert"    on public.samples;
+drop policy if exists "samples update"    on public.samples;
 drop policy if exists "samples delete"    on public.samples;
 
 create policy "soul read"      on public.soul    for select using (true);
 create policy "soul update"    on public.soul    for update using (true) with check (true);
 create policy "samples read"   on public.samples for select using (true);
 create policy "samples insert" on public.samples for insert with check (true);
+create policy "samples update" on public.samples for update using (true) with check (true);
 create policy "samples delete" on public.samples for delete using (true);
 
 -- ---------- storage ----------
@@ -109,6 +111,7 @@ on conflict (id) do update set
 
 drop policy if exists "fragments read"   on storage.objects;
 drop policy if exists "fragments upload" on storage.objects;
+drop policy if exists "fragments update" on storage.objects;
 drop policy if exists "fragments delete" on storage.objects;
 
 create policy "fragments read"
@@ -117,6 +120,12 @@ create policy "fragments read"
 
 create policy "fragments upload"
   on storage.objects for insert
+  with check (bucket_id = 'fragments');
+
+-- needed so upload({ upsert: true }) can replace an existing object
+create policy "fragments update"
+  on storage.objects for update
+  using (bucket_id = 'fragments')
   with check (bucket_id = 'fragments');
 
 create policy "fragments delete"

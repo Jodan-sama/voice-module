@@ -55,18 +55,42 @@ function shuffle(arr) {
   return arr;
 }
 
+// Track local Blob URLs so we can revoke them when the sample is removed
+// from the pool. Keeps memory bounded; only relevant for our own freshly-
+// uploaded samples (other clients' samples come in via public URLs).
+const localBlobUrls = new Map();
+
+function dropLocalBlob(id) {
+  const u = localBlobUrls.get(id);
+  if (!u) return;
+  try { URL.revokeObjectURL(u); } catch {}
+  localBlobUrls.delete(id);
+}
+
 // Add a sample row to the local pool, deduplicating by id and keeping the
 // pool size capped at POOL_TARGET by replacing a random existing slot once
-// the cap is hit. Returns true if the pool changed.
-function addToPool(row) {
+// the cap is hit. If `localBlob` is provided, we play from a Blob URL
+// instead of the public CDN URL — eliminates the brief window after upload
+// where Supabase's edge cache hasn't propagated and the public URL would
+// 404. Returns true if the pool changed.
+function addToPool(row, localBlob = null) {
   if (!row) return false;
   if (samples.some((s) => s.id === row.id)) return false;
-  const withU = withUrl(row);
+  let entry = withUrl(row);
+  if (localBlob && typeof URL !== 'undefined' && URL.createObjectURL) {
+    try {
+      const blobUrl = URL.createObjectURL(localBlob);
+      entry = { ...entry, url: blobUrl };
+      localBlobUrls.set(row.id, blobUrl);
+    } catch (e) { /* fall back to public URL */ }
+  }
   if (samples.length >= POOL_TARGET) {
     const idx = (Math.random() * samples.length) | 0;
-    samples = samples.map((s, i) => (i === idx ? withU : s));
+    const evicted = samples[idx];
+    if (evicted) dropLocalBlob(evicted.id);
+    samples = samples.map((s, i) => (i === idx ? entry : s));
   } else {
-    samples = [withU, ...samples];
+    samples = [entry, ...samples];
   }
   return true;
 }
@@ -106,6 +130,11 @@ export async function refreshSamplePool() {
   try {
     const next = await fetchSamplePool();
     if (!next.length) return;  // don't wipe to empty on a transient failure
+    // revoke any local Blob URLs whose samples didn't make it into the new pool
+    const keepIds = new Set(next.map((s) => s.id));
+    for (const [id] of localBlobUrls) {
+      if (!keepIds.has(id)) dropLocalBlob(id);
+    }
     samples = next;
     emit('sample', samples);
   } catch (err) {
@@ -195,6 +224,7 @@ export async function connect() {
     .on('postgres_changes',
       { event: 'DELETE', schema: 'public', table: 'samples' },
       ({ old }) => {
+        dropLocalBlob(old.id);
         samples = samples.filter(s => s.id !== old.id);
         emit('sample', samples);
       })
@@ -386,9 +416,11 @@ export async function uploadSample(blob, mime, duration) {
     throw new Error(`insert: ${error.message || 'unknown'}`);
   }
   // ensure the uploader always hears their own voice regardless of the
-  // Realtime INSERT's 80% probability filter. addToPool dedups by id, so
-  // when the Realtime echo arrives it's a no-op.
-  if (addToPool(data)) emit('sample', samples);
+  // Realtime INSERT's 80% probability filter. pass the local blob so the
+  // sample plays from a Blob URL — eliminates the CDN-propagation window
+  // where the public URL would 404 right after upload. addToPool dedups
+  // by id, so when the Realtime echo arrives it's a no-op.
+  if (addToPool(data, blob)) emit('sample', samples);
   return { ...data, label };
 }
 

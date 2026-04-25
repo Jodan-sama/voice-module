@@ -13,14 +13,27 @@ const MIN_DURATION_SEC = 0.2;  // refuse to upload anything shorter (empty mic, 
 // header carries an explicit sample count, so downstream tooling always
 // reads the correct duration. Tone.js's decodeAudioData works either way,
 // but the cloud preview is much more useful with WAV.
-export function initRecord({ button, status }) {
+export function initRecord({ button, status, hint }) {
   let busy = false;
+  // restoreText reads the hint element fresh each time so we always go back
+  // to the genuine 'tap to leave a voice' string, never to whatever happens
+  // to be in the status bar (which may itself be a stale label from a prior
+  // recording or phase transition mid-revert).
+  const restoreText = () => hint?.textContent ?? '';
+  // setStatusWithRevert: write `text`, then revert after `holdMs` only if
+  // the status hasn't been overwritten in the meantime. prevents leftover
+  // timers from clobbering newer state.
+  function setStatusWithRevert(text, holdMs) {
+    status.textContent = text;
+    setTimeout(() => {
+      if (status.textContent === text) status.textContent = restoreText();
+    }, holdMs);
+  }
 
   button.addEventListener('click', async () => {
     if (busy) return;
     busy = true;
     button.classList.add('active');
-    const originalHint = status.textContent;
     try {
       // Switch the iOS audio session into 'play-and-record' BEFORE asking for
       // the mic — the 'playback' default we set at startup rejects getUserMedia.
@@ -90,9 +103,8 @@ export function initRecord({ button, status }) {
       const sample = await state.uploadSample(uploadBlob, uploadMime, decodedDuration);
       const label = sample?.label || 'woven in';
       const rare = label !== 'woven in';
-      status.textContent = label;
       // long-lived fragments deserve to linger on screen a moment
-      setTimeout(() => { status.textContent = originalHint; }, rare ? 6000 : 1800);
+      setStatusWithRevert(label, rare ? 6000 : 1800);
     } catch (err) {
       console.error('[record] failed', err);
       let msg;
@@ -104,8 +116,7 @@ export function initRecord({ button, status }) {
       } else {
         msg = 'couldn\'t record';
       }
-      status.textContent = msg;
-      setTimeout(() => { status.textContent = originalHint; }, 9000);
+      setStatusWithRevert(msg, 9000);
     } finally {
       // always revert the iOS session so the low-end filter never lingers,
       // whether recording succeeded, errored, or was cancelled mid-way

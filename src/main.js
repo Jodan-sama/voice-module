@@ -238,7 +238,7 @@ state.on('phase', (phase) => {
   }
 });
 
-initRecord({ button: recordBtn, status });
+initRecord({ button: recordBtn, status, hint });
 
 // first-paint nudge
 status.textContent = 'tap anywhere to listen';

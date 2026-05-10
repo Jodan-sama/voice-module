@@ -227,8 +227,10 @@ state.on('phase', (phase) => {
   }
   if (phase === 'sleeping') {
     sleepCount++;
-    // on every sleep: ~75% chance to summon a cloud elder into the pool
-    if (Math.random() < 0.75) {
+    // ~25% chance per sleep to summon a cloud elder into the pool. dropped
+    // from 75% — when only a few elders exist in the cloud, a high summon
+    // rate just keeps re-pulling the same ghosts and they dominate.
+    if (Math.random() < 0.25) {
       state.summonElderSample().catch(() => {});
     }
     // on every second sleep: rotate the whole pool during the quiet

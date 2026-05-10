@@ -1,4 +1,6 @@
 import * as Tone from 'tone';
+import { isSessionLocal } from '../state.js';
+import { SAMPLE_LIFESPAN_MS } from '../soul/evolve.js';
 
 // Caches decoded buffers. Plays random fragments of a recorded voice,
 // pitched to the current key, through the shared effect chain.
@@ -69,10 +71,14 @@ export class SampleBank {
     this.buffers.set(s.id, buf);
   }
 
-  // uniform random pick from loaded samples. the pool itself is curated
-  // at fetch time (random 24h non-elders + elder fill), so we intentionally
-  // don't apply an age/life bias here — otherwise fresh samples would still
-  // dominate and defeat the fetch-side randomness.
+  // weighted random pick from loaded samples.
+  //   session-local (uploaded this tab):     4×   — listener hears their voice often
+  //   fresh (default-tier non-elder):        1×   — baseline
+  //   elder (week-or-longer-tier):           0.35× — present but quiet ghosts
+  // these weights were chosen so a single fresh-sample pool plays uniformly,
+  // a single session-local sample is heard ~4× more than a same-pool fresh,
+  // and a 6-elder fill on a quiet day still leaves elders as a minority of
+  // the actual playback even though they may take up many slots.
   pickWeighted() {
     if (!this.samples.length) return null;
     const loaded = this.samples.filter((s) => {
@@ -80,7 +86,22 @@ export class SampleBank {
       return b && b.loaded;
     });
     if (!loaded.length) return null;
-    return loaded[(Math.random() * loaded.length) | 0];
+    const weights = new Array(loaded.length);
+    let total = 0;
+    for (let i = 0; i < loaded.length; i++) {
+      const s = loaded[i];
+      const w = isSessionLocal(s.id) ? 4
+              : Number(s.lifespan_ms) > SAMPLE_LIFESPAN_MS ? 0.35
+              : 1;
+      weights[i] = w;
+      total += w;
+    }
+    let r = Math.random() * total;
+    for (let i = 0; i < loaded.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return loaded[i];
+    }
+    return loaded[loaded.length - 1];
   }
 
   /**

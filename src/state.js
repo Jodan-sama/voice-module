@@ -60,6 +60,13 @@ function shuffle(arr) {
 // uploaded samples (other clients' samples come in via public URLs).
 const localBlobUrls = new Map();
 
+// Track sample ids that originated in *this* tab's session. They get a
+// strong pick-time weight and are never evicted from the pool, so the
+// listener always hears their own latest voice. Cleared on reload.
+const sessionLocalIds = new Set();
+export function isSessionLocal(id) { return sessionLocalIds.has(id); }
+export function getSessionLocalIds() { return new Set(sessionLocalIds); }
+
 function dropLocalBlob(id) {
   const u = localBlobUrls.get(id);
   if (!u) return;
@@ -85,10 +92,20 @@ function addToPool(row, localBlob = null) {
     } catch (e) { /* fall back to public URL */ }
   }
   if (samples.length >= POOL_TARGET) {
-    const idx = (Math.random() * samples.length) | 0;
-    const evicted = samples[idx];
-    if (evicted) dropLocalBlob(evicted.id);
-    samples = samples.map((s, i) => (i === idx ? entry : s));
+    // pick a random non-session-local slot to evict; session-locals are sticky
+    const evictableIndices = [];
+    for (let i = 0; i < samples.length; i++) {
+      if (!sessionLocalIds.has(samples[i].id)) evictableIndices.push(i);
+    }
+    if (evictableIndices.length === 0) {
+      // pool is entirely session-local — extremely rare; just append over cap
+      samples = [entry, ...samples];
+    } else {
+      const idx = evictableIndices[(Math.random() * evictableIndices.length) | 0];
+      const evicted = samples[idx];
+      if (evicted) dropLocalBlob(evicted.id);
+      samples = samples.map((s, i) => (i === idx ? entry : s));
+    }
   } else {
     samples = [entry, ...samples];
   }
@@ -109,9 +126,12 @@ async function fetchSamplePool() {
 
   const pool = shuffle([...(fresh || [])]).slice(0, POOL_TARGET);
 
-  // 2. fill the deficit with random elders when fresh recordings are sparse
+  // 2. fill any deficit with random elders, but cap at MAX_ELDERS so a slow
+  // day doesn't end up with a pool dominated by the same handful of ghosts.
+  // fresh recordings always lead the mix; elders are a minority element.
+  const MAX_ELDERS = 6;
   if (pool.length < POOL_TARGET) {
-    const deficit = POOL_TARGET - pool.length;
+    const deficit = Math.min(POOL_TARGET - pool.length, MAX_ELDERS);
     const { data: elders, error: eErr } = await supabase
       .from('samples')
       .select('*')
@@ -130,12 +150,19 @@ export async function refreshSamplePool() {
   try {
     const next = await fetchSamplePool();
     if (!next.length) return;  // don't wipe to empty on a transient failure
-    // revoke any local Blob URLs whose samples didn't make it into the new pool
-    const keepIds = new Set(next.map((s) => s.id));
+    // session-local samples must persist across refreshes — listener should
+    // always hear their own latest voice even when the random pool churns.
+    const nextIds = new Set(next.map((s) => s.id));
+    const sessionRetained = samples.filter(
+      (s) => sessionLocalIds.has(s.id) && !nextIds.has(s.id)
+    );
+    const merged = [...sessionRetained, ...next].slice(0, POOL_TARGET);
+    // revoke local Blob URLs that didn't make it into the merged result
+    const keepIds = new Set(merged.map((s) => s.id));
     for (const [id] of localBlobUrls) {
       if (!keepIds.has(id)) dropLocalBlob(id);
     }
-    samples = next;
+    samples = merged;
     emit('sample', samples);
   } catch (err) {
     console.warn('[living] pool refresh failed', err);
@@ -415,6 +442,10 @@ export async function uploadSample(blob, mime, duration) {
     console.error('[living] samples insert failed', error);
     throw new Error(`insert: ${error.message || 'unknown'}`);
   }
+  // mark this id as session-local BEFORE addToPool so the eviction logic
+  // and the pickWeighted weighting both see it as ours from the moment it
+  // joins the pool.
+  sessionLocalIds.add(data.id);
   // ensure the uploader always hears their own voice regardless of the
   // Realtime INSERT's 80% probability filter. pass the local blob so the
   // sample plays from a Blob URL — eliminates the CDN-propagation window

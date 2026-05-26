@@ -16,8 +16,13 @@ export const supabase = createClient(url ?? 'http://missing', anon ?? 'missing',
   auth: { persistSession: false },
 });
 
-// storage helpers
-export const BUCKET = 'fragments';
+// project-scoped names — the destination Supabase project hosts multiple
+// projects' data behind prefixes (e.g. tn_* for TOMI NIASHI). all of our
+// table/bucket references live behind these constants.
+export const SOUL_TABLE = 'li_soul';
+export const SAMPLES_TABLE = 'li_samples';
+export const BUCKET = 'li-fragments';
+
 export function publicUrl(path) {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }

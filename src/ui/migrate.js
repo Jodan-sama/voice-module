@@ -12,7 +12,7 @@
 // Safe to re-run. The live instrument keeps working while the migration is
 // running; Realtime INSERT for newly uploaded WAVs updates every open tab.
 
-import { supabase, BUCKET } from '../supa.js';
+import { supabase, BUCKET, SAMPLES_TABLE } from '../supa.js';
 import { audioBlobToWav } from '../audio/wav.js';
 
 export async function migrateAllSamples({
@@ -22,7 +22,7 @@ export async function migrateAllSamples({
 } = {}) {
   const started = performance.now();
   const { data: rows, error } = await supabase
-    .from('samples')
+    .from(SAMPLES_TABLE)
     .select('id, path, mime, duration, lifespan_ms, created_at')
     .order('created_at', { ascending: true });
   if (error) {
@@ -109,7 +109,7 @@ async function migrateOne(row) {
   if (upErr) throw new Error(`upload: ${upErr.message}`);
 
   // 4. flip the DB row to the new path
-  const { error: updErr } = await supabase.from('samples').update({
+  const { error: updErr } = await supabase.from(SAMPLES_TABLE).update({
     path: newPath,
     mime: 'audio/wav',
     duration: wav.duration,

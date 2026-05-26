@@ -10,7 +10,7 @@
 //   presence sync elects another within ~2s. When the site is empty,
 //   the instrument sleeps. When someone returns, evolution catches up.
 
-import { supabase, publicUrl } from './supa.js';
+import { supabase, publicUrl, SOUL_TABLE, SAMPLES_TABLE, BUCKET } from './supa.js';
 import { tickEvolution, computePulse, createInitialState, sampleLife, SAMPLE_LIFESPAN_MS } from './soul/evolve.js';
 
 const PRESENCE_CHANNEL = 'living:presence';
@@ -117,7 +117,7 @@ async function fetchSamplePool() {
 
   // 1. fresh non-elders from the last 24h — cast a wide net, shuffle locally
   const { data: fresh, error: fErr } = await supabase
-    .from('samples')
+    .from(SAMPLES_TABLE)
     .select('*')
     .gte('created_at', cutoff)
     .lte('lifespan_ms', SAMPLE_LIFESPAN_MS)
@@ -133,7 +133,7 @@ async function fetchSamplePool() {
   if (pool.length < POOL_TARGET) {
     const deficit = Math.min(POOL_TARGET - pool.length, MAX_ELDERS);
     const { data: elders, error: eErr } = await supabase
-      .from('samples')
+      .from(SAMPLES_TABLE)
       .select('*')
       .gt('lifespan_ms', SAMPLE_LIFESPAN_MS)
       .order('created_at', { ascending: false })
@@ -174,7 +174,7 @@ export async function refreshSamplePool() {
 export async function connect() {
   // 1. initial soul + sample pool, in parallel
   const [{ data: soul, error: se }, pool] = await Promise.all([
-    supabase.from('soul').select('state').eq('id', 1).single(),
+    supabase.from(SOUL_TABLE).select('state').eq('id', 1).single(),
     fetchSamplePool(),
   ]);
   if (se) console.warn('[living] soul fetch', se);
@@ -226,7 +226,7 @@ export async function connect() {
   supabase
     .channel(SOUL_CHANNEL)
     .on('postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'soul', filter: 'id=eq.1' },
+      { event: 'UPDATE', schema: 'public', table: SOUL_TABLE, filter: 'id=eq.1' },
       (payload) => {
         const next = normalizeState(payload.new?.state);
         const prevPhase = current?.phase;
@@ -239,7 +239,7 @@ export async function connect() {
   supabase
     .channel('living:samples')
     .on('postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'samples' },
+      { event: 'INSERT', schema: 'public', table: SAMPLES_TABLE },
       ({ new: row }) => {
         // the uploader already added their own sample locally in uploadSample();
         // addToPool dedups by id, so that case is a no-op here. remote inserts
@@ -249,7 +249,7 @@ export async function connect() {
         if (addToPool(row)) emit('sample', samples);
       })
     .on('postgres_changes',
-      { event: 'DELETE', schema: 'public', table: 'samples' },
+      { event: 'DELETE', schema: 'public', table: SAMPLES_TABLE },
       ({ old }) => {
         dropLocalBlob(old.id);
         samples = samples.filter(s => s.id !== old.id);
@@ -346,7 +346,7 @@ async function persistNow() {
   dirtySince = 0;
   lastPersistAt = Date.now();
   const toWrite = { state: current, leader_id: sessionId, leader_seen: new Date().toISOString() };
-  const { error } = await supabase.from('soul').update(toWrite).eq('id', 1);
+  const { error } = await supabase.from(SOUL_TABLE).update(toWrite).eq('id', 1);
   if (error) console.warn('[living] soul persist failed', error);
 }
 
@@ -360,7 +360,7 @@ export async function summonElderSample() {
   _summoning = true;
   try {
     const { data, error } = await supabase
-      .from('samples')
+      .from(SAMPLES_TABLE)
       .select('*')
       .gt('lifespan_ms', SAMPLE_LIFESPAN_MS)     // only long-tier fragments qualify
       .order('created_at', { ascending: true })  // oldest first — mysterious ghosts
@@ -384,7 +384,7 @@ async function leaderCull() {
   if (!isLeader) return;
   // fetch all and filter client-side — each sample carries its own lifespan now
   const { data: all, error } = await supabase
-    .from('samples')
+    .from(SAMPLES_TABLE)
     .select('id, path, created_at, lifespan_ms');
   if (error) return console.warn('[living] cull query failed', error);
   const now = Date.now();
@@ -396,8 +396,8 @@ async function leaderCull() {
   if (!dead.length) return;
   const ids = dead.map((d) => d.id);
   const paths = dead.map((d) => d.path).filter(Boolean);
-  await supabase.from('samples').delete().in('id', ids);
-  if (paths.length) await supabase.storage.from('fragments').remove(paths);
+  await supabase.from(SAMPLES_TABLE).delete().in('id', ids);
+  if (paths.length) await supabase.storage.from(BUCKET).remove(paths);
 }
 
 // ——— uploads ———
@@ -423,7 +423,7 @@ export async function uploadSample(blob, mime, duration) {
   const baseMime = String(mime || 'audio/webm').split(';')[0].trim().toLowerCase();
   const ext = extFor(baseMime);
   const path = `${id}.${ext}`;
-  const { error: upErr } = await supabase.storage.from('fragments').upload(path, blob, {
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, blob, {
     contentType: baseMime,
     cacheControl: '31536000',
     upsert: false,
@@ -434,7 +434,7 @@ export async function uploadSample(blob, mime, duration) {
   }
   const { ms: lifespan_ms, label } = rollLifespan();
   const { data, error } = await supabase
-    .from('samples')
+    .from(SAMPLES_TABLE)
     .insert({ path, mime: baseMime, duration, lifespan_ms })
     .select()
     .single();

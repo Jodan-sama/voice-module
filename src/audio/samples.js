@@ -8,6 +8,7 @@ import { SAMPLE_LIFESPAN_MS } from '../soul/evolve.js';
 export class SampleBank {
   constructor() {
     this.buffers = new Map(); // id -> Tone.ToneAudioBuffer
+    this.loadAttempts = new Map(); // id -> failed load count, drives retry backoff
     this.samples = [];        // full list from soul
     // diagnostics — how many trigger calls land vs. bail, and why
     this.stats = { attempted: 0, played: 0, noSamples: 0, noneLoaded: 0, noBuffer: 0 };
@@ -50,6 +51,7 @@ export class SampleBank {
         const b = this.buffers.get(id);
         try { b.dispose(); } catch {}
         this.buffers.delete(id);
+        this.loadAttempts.delete(id);
       }
     }
   }
@@ -60,12 +62,26 @@ export class SampleBank {
     const buf = new Tone.ToneAudioBuffer(
       s.url,
       () => {
+        this.loadAttempts.delete(s.id);
         this._emitLoad({ phase: 'success', id: s.id });
       },
       (err) => {
-        console.warn('[samples] load failed', s.id, s.url, err);
+        const attempt = (this.loadAttempts.get(s.id) || 0) + 1;
+        this.loadAttempts.set(s.id, attempt);
+        console.warn('[samples] load failed', s.id, s.url, err, `attempt ${attempt}`);
         this._emitLoad({ phase: 'fail', id: s.id, error: err });
         this.buffers.delete(s.id);
+        // A sample another listener just uploaded can 404 for a few seconds
+        // until Supabase's CDN has the object. Without a retry it sat in the
+        // pool unplayable until the next pool change (minutes). Back off
+        // 3s -> 8s -> 20s, then give up until the pool changes.
+        const RETRY_MS = [3000, 8000, 20000];
+        if (attempt <= RETRY_MS.length) {
+          setTimeout(() => {
+            const stillInPool = this.samples.some((x) => x.id === s.id);
+            if (stillInPool && !this.buffers.has(s.id)) this._ensureLoaded(s);
+          }, RETRY_MS[attempt - 1]);
+        }
       }
     );
     this.buffers.set(s.id, buf);

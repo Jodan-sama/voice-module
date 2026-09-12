@@ -9,8 +9,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 const SITE = 'https://voices.konpakt.design';
-const DST_URL = 'https://lueovxcoqrkjdjxfvwng.supabase.co';
-const DST_KEY = 'sb_publishable__lKNH5ui_nFn57fiAx2VDg_0yShDBro';
+const DST_URL = 'https://ixvmxohvroutmcfrcprs.supabase.co';
+const DST_KEY = 'sb_publishable___pateTIsoOXx50s1_FFHg_quOIdiCu';
 const OLD_REF = 'fhdyvzxoosydpiytnqgo';
 const NEW_REF = 'lueovxcoqrkjdjxfvwng';
 
